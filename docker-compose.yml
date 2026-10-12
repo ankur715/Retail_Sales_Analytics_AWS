@@ -1,0 +1,61 @@
+# Local stack for the course milestones; runs in the Codespace, never on the laptop or AWS.
+# Start only the profile a task needs:   docker compose --profile app up -d --build
+# Stop it when done:                     docker compose --profile app down
+#
+# app: the chatbot on the fake LLM (no model, no cost), a Postgres copy of the chat.* views
+#      (seeded by scripts/export_chat_views.py) and Redis (the cache, from milestone 2).
+# Passwords below are local-only defaults for throwaway containers, not real credentials.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["app"]
+    environment:
+      POSTGRES_DB: retail_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres-local}
+      CHAT_READER_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
+    volumes:
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d retail_dev"]
+      interval: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 512m }
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["app"]
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 128m }
+
+  chatbot:
+    build: { context: ., dockerfile: docker/chatbot.Dockerfile }
+    profiles: ["app"]
+    ports: ["8000:8000"]
+    environment:
+      ENV: dev
+      LLM_PROVIDER: fake
+      FAKE_LLM_LATENCY_MS: ${FAKE_LLM_LATENCY_MS:-800}
+      FAKE_LLM_ERROR_RATE: ${FAKE_LLM_ERROR_RATE:-0}
+      REDSHIFT_HOST: postgres
+      REDSHIFT_PORT: "5432"
+      REDSHIFT_DB: retail_dev
+      REDSHIFT_SSLMODE: disable
+      CHAT_REDSHIFT_USER: chat_reader
+      CHAT_REDSHIFT_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 512m }

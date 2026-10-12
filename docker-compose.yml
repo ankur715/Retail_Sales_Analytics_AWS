@@ -72,7 +72,7 @@ services:
     depends_on: [jaeger]
     deploy:
       resources:
-        limits: { memory: 128m }
+        limits: { memory: 192m }
 
   jaeger:
     image: jaegertracing/all-in-one:1.62.0
@@ -109,4 +109,4 @@ services:
     depends_on: [prometheus, jaeger]
     deploy:
       resources:
-        limits: { memory: 256m }
+        limits: { memory: 384m }

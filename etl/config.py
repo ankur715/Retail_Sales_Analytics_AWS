@@ -43,13 +43,16 @@ RETAILER_API_TOKEN = os.environ.get("RETAILER_API_TOKEN", "local-dev-token")
 
 # --- LLM features: the analytics chatbot (chatbot/) and the triage agent (triage/) ---
 # none (the default) turns every LLM feature off, so CI, tests and a fresh clone never
-# call a model. gemini | bedrock pick the chatbot's provider; the triage agent always
-# runs on Amazon Bedrock (TRIAGE_MODEL below) whenever this is not none.
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "none").strip().lower()   # none | gemini | bedrock
+# call a model. gemini | bedrock pick the chatbot's provider; fake answers the chatbot
+# with canned SQL and never calls a model (load and chaos tests). The triage agent runs
+# on Amazon Bedrock (TRIAGE_MODEL below) only with gemini | bedrock.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "none").strip().lower()   # none | gemini | bedrock | fake
 BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL", "claude-opus-5-5")       # or a full id / inference profile
 LLM_BEDROCK_ENDPOINT = os.environ.get("LLM_BEDROCK_ENDPOINT", "mantle").strip().lower()   # mantle | runtime
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+FAKE_LLM_LATENCY_MS = float(os.environ.get("FAKE_LLM_LATENCY_MS", "0"))   # mean delay per fake call
+FAKE_LLM_ERROR_RATE = float(os.environ.get("FAKE_LLM_ERROR_RATE", "0"))   # 0..1, share raising "busy"
 CHAT_REDSHIFT_USER = os.environ.get("CHAT_REDSHIFT_USER", "chat_reader")
 CHAT_REDSHIFT_PASSWORD = os.environ.get("CHAT_REDSHIFT_PASSWORD", "")
 

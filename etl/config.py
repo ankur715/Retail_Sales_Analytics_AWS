@@ -32,6 +32,7 @@ S3_ENV_PREFIX = ENV                                   # every key in this env st
 # --- Redshift Serverless (Postgres wire protocol, port 5439) ---
 REDSHIFT_HOST = os.environ.get("REDSHIFT_HOST", "")
 REDSHIFT_PORT = int(os.environ.get("REDSHIFT_PORT", "5439"))
+REDSHIFT_SSLMODE = os.environ.get("REDSHIFT_SSLMODE", "require")   # disable only for the local Postgres copy
 REDSHIFT_DB = os.environ.get("REDSHIFT_DB", f"retail_{ENV}")   # retail_dev / retail_prod
 REDSHIFT_USER = os.environ.get("REDSHIFT_USER", "admin")
 REDSHIFT_PASSWORD = os.environ.get("REDSHIFT_PASSWORD", "")

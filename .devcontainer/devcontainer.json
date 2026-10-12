@@ -1,6 +1,6 @@
 {
   "name": "retail-sales-analytics",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "build": { "dockerfile": "Dockerfile" },
   "hostRequirements": { "cpus": 2, "memory": "8gb" },
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:4": {},

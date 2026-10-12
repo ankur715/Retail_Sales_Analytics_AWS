@@ -33,6 +33,7 @@ to approve. See [Pipeline Triage Agent](#pipeline-triage-agent).
 | **Reconcile gate** | Nothing reaches the fact table unless `src = stg + rej` for every week, in rows, sales and inventory | `etl.etl_stats`, `etl.load_audit` |
 | **Analytics chatbot** | Plain-English question → SQL on curated views (read-only user, validated SQL) → answer with its data | FastAPI, Claude on Bedrock or Gemini |
 | **Pipeline Triage Agent** | When a load fails, investigates with read-only tools and writes a diagnosis and a fix for a person to approve | Bedrock Converse tool use, Nova Lite (Claude Haiku 4.5 optional) |
+| **Observability** | A trace span per chatbot step, a golden-signals dashboard and a k6 load test at 1x and 10x: the three LLM calls are 99% of latency, the database about 1% | OpenTelemetry, Jaeger, Prometheus, Grafana, k6, Docker Compose in a Codespace |
 
 <table>
 <tr>
@@ -348,6 +349,11 @@ makes the calls:
 | Limits and cost | Pay per token: a question is 3 short calls, about a cent with Haiku. No daily cap | Free tier: **about 20 requests per model per day**, so roughly 6 new questions a day |
 | Errors → 503 with a clear message | Throttling and 5xx after the SDK's retries; IAM or model-access problems reported as configuration; refusals reported as declined | 503 overload and per-minute 429 retried, honouring `retryDelay`; a daily quota fails fast |
 
+A third provider, `fake`, answers with canned SQL from the catalog and a
+configurable delay and error rate (`FAKE_LLM_LATENCY_MS`, `FAKE_LLM_ERROR_RATE`).
+It costs nothing and is used only for load and chaos tests
+([Observability](#observability-where-the-chatbots-latency-goes)).
+
 Gemini was the first provider. Testing used up its free daily quota within
 a few questions, which is why the local setup switched to Bedrock, the same
 way the Member Engagement project calls Claude.
@@ -453,8 +459,9 @@ failing load. Results are cached per run, so a repeated tool call is free.
     raises: Bedrock errors, tool errors and save errors are logged.
   - Airflow keeps reporting the task's own exception. A test makes both
     steps raise and checks that the callback still returns cleanly.
-- **Off by default:** with `LLM_PROVIDER=none`, the default and what CI
-  uses, the agent is skipped without a Bedrock client being created.
+- **Off by default:** with `LLM_PROVIDER=none` (the default, and what CI
+  uses) or `fake` (load tests), the agent is skipped without a Bedrock
+  client being created. Only `gemini` or `bedrock` turn it on.
 
 **Models:**
 
@@ -491,7 +498,7 @@ only when a load fails, not on every run.
 RETAIL_ENV=dev .venv/bin/python -m etl.migrate           # V011: triage_note / triage_model / triage_tokens
 RETAIL_ENV=dev .venv/bin/python -m triage.setup_reader   # read-only user (TRIAGE_REDSHIFT_PASSWORD in .env)
 (cd infra/terraform && terraform apply)                 # allow Nova Lite in the Bedrock invoke policy
-# .env: LLM_PROVIDER=bedrock (anything but none), TRIAGE_MODEL=nova-lite or claude-haiku
+# .env: LLM_PROVIDER=bedrock (or gemini; none and fake turn it off), TRIAGE_MODEL=nova-lite or claude-haiku
 ```
 
 **Verified live** in dev, on Nova Lite. To create a real failure, one
@@ -586,6 +593,95 @@ duplicated mapping row (sender redacted):
 .venv/bin/python -m etl.alerts --load <load_id>     # email an existing failed load with its saved triage note
 ```
 
+## Observability: where the chatbot's latency goes
+
+Before optimizing the chatbot, measure it. Each question now produces one
+trace with a span per step, and the service exposes the four golden signals
+(traffic, errors, latency, saturation) to Prometheus. Everything runs as a
+Docker Compose stack in a GitHub Codespace, with the chatbot on a **fake
+LLM** (canned SQL, ~800 ms random delay per call) and a **Postgres copy of
+the `chat.*` views**. The load test never touches Redshift or a real model,
+so it costs nothing.
+
+```mermaid
+C4Container
+title Chatbot with observability (local Compose stack in a Codespace)
+Person(analyst, "Analyst", "Asks sales questions")
+System_Ext(k6, "k6", "Load test: 1x = 2 users, 10x = 20 users")
+System_Ext(llm, "LLM provider", "Fake (in-process) here; Claude on Bedrock or Gemini in production")
+Container_Boundary(app, "app profile") {
+  Container(chatbot, "Chatbot", "FastAPI", "route, write SQL, validate, query, summarize")
+  ContainerDb(pg, "Postgres", "Copy of the chat.* views", "Read-only chat_reader")
+  ContainerDb(redis, "Redis", "Answer cache (milestone 2)")
+}
+Container_Boundary(obs, "obs profile") {
+  Container(otel, "OTel Collector", "OTLP")
+  Container(jaeger, "Jaeger", "Traces")
+  Container(prom, "Prometheus", "Metrics")
+  Container(grafana, "Grafana", "Golden-signals dashboard")
+}
+Rel(analyst, chatbot, "POST /api/chat")
+Rel(k6, chatbot, "POST /api/chat")
+Rel(chatbot, llm, "3 calls per question")
+Rel(chatbot, pg, "SELECT")
+Rel(chatbot, otel, "Spans", "OTLP/HTTP")
+Rel(otel, jaeger, "Spans", "OTLP/gRPC")
+Rel(prom, chatbot, "Scrapes /metrics", "every 5 s")
+Rel(grafana, prom, "PromQL")
+```
+
+**Result** ([ADR 0001](docs/adr/0001-where-the-latency-goes.md)): the three
+sequential LLM calls take **99% of request time at 1x and 98.6% at 10x**;
+database queries and SQL validation take about 1.4%. So the next steps target
+the LLM path (a Redis answer cache, merging `route` and `write_sql`,
+streaming the summary), not the database.
+
+| k6, 3 min each | 1x (2 users) | 10x (20 users) |
+|---|---|---|
+| Throughput | 0.85 req/s | 7.99 req/s (9.4x) |
+| Failed | 0% | 0% |
+| p50 / p95 / p99 | 1.98 / 4.23 / 5.80 s | 2.17 / 5.13 / 7.10 s |
+
+<img src="pics/obs_grafana_golden_signals.jpg" alt="Grafana golden-signals dashboard during the k6 run: traffic rising from about 1 to 8 requests per second, 0% errors, p95 latency, 20 requests in flight, and a stacked per-step time panel dominated by the three LLM steps" width="900">
+
+*1x, then 10x: traffic rises nine-fold with 0% errors and p95 barely moves.
+In "where the time goes", the three LLM bands are nearly all of the stack;
+the database is the thin line at the bottom.*
+
+<img src="pics/obs_jaeger_llm_span.jpg" alt="Jaeger trace of one chat request: llm.route 102 ms, llm.write_sql 393 ms, database spans about 18 ms each, llm.summarize 1.68 s of a 2.21 s request" width="900">
+
+*One request at 10x: the LLM spans (`llm.route`, `llm.write_sql`,
+`llm.summarize`) fill the 2.21 s timeline, and the database queries are
+slivers. Here `summarize` was the longest by chance; on average the three
+calls split evenly, because the fake model draws them all from one delay
+distribution.*
+
+<img src="pics/loadtest_k6_10x.jpg" alt="k6 results table: 1x vs 10x virtual users, requests, throughput, failures, checks and latency percentiles" width="520">
+
+*Ten times the users, 9.4 times the throughput, no failures: the service
+spends its time waiting on the model, not on CPU. With a real provider, its
+rate limit, not this service, sets the ceiling.*
+
+Grafana's p95 (6.6 s) is higher than k6's (5.1 s) because Prometheus
+estimates percentiles from histogram buckets; k6 measures every request.
+
+### Run it (in the Codespace, never on the laptop)
+
+```bash
+docker compose --profile app --profile obs up -d --build      # chatbot, Postgres, Redis + collector, Jaeger, Prometheus, Grafana
+docker compose --profile load run --rm k6 run -e LOAD=1x /scripts/chat.js
+docker compose --profile load run --rm k6 run -e LOAD=10x /scripts/chat.js
+.venv/bin/python -m scripts.screenshots                        # retake the three images above
+docker compose --profile app --profile obs down                # stop when done
+```
+
+From the laptop, `gh codespace ports forward 8000:8000 3000:3000 16686:16686 -c <codespace>`
+opens the chatbot, Grafana and Jaeger on `localhost`. The Postgres seed comes from
+`scripts/export_chat_views.py`, run from the laptop as `chat_reader` (Redshift only allows
+the laptop's IP). Spans carry no question text, answers or rows. Tracing is off unless
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set, so tests and CI send nothing. What went wrong along
+the way is in [docs/m1-what-broke.md](docs/m1-what-broke.md).
+
 ## Dummy data
 
 3 clients (Aurora Apparel, Bramble Footwear, Cobalt Outdoor) × 3 retailers.
@@ -671,7 +767,7 @@ To run one pipeline from the CLI without Airflow (same steps as its DAG):
 ## Tests
 
 ```bash
-.venv/bin/pytest -q tests                  # 99 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, both LLM providers and their errors), triage agent (tool loop with a mocked Bedrock client, step/token caps, LLM_PROVIDER=none skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
+.venv/bin/pytest -q tests                  # 113 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
 cd airflow && ../.venv/bin/pytest -q tests # 15 DAG tests: one DAG per pipeline, subflow shape, reconcile gates the merge, every Redshift writer pooled, priority order, failure path (FAILED, then triage, then email; none can raise)
 ```
 
@@ -722,6 +818,11 @@ costs about $0.001 per failed load on Nova Lite
 ([cost per run](#pipeline-triage-agent)). `terraform destroy` removes
 everything (`force_destroy` on the dummy-data bucket).
 
+The observability stack and load tests cost nothing on AWS: they run in a
+2-core GitHub Codespace against the fake LLM and a Postgres copy, using the
+free monthly Codespaces hours. The one AWS step, exporting the `chat.*` views
+(about 2,000 rows), is a single short Redshift session, about $0.05.
+
 ## Layout
 
 ```
@@ -732,9 +833,16 @@ airflow/dags/                  DAG factory + metadata sync DAG
 airflow/start_airflow.sh       local Airflow per environment
 data_gen/                      synthetic catalog + retailer file layouts
 mock_api/                      FastAPI retailer API (bearer token, cursor paging)
-chatbot/                       analytics chatbot: routing, SQL guard, read-only DB access, Bedrock/Gemini providers, FastAPI + chat page
+chatbot/                       analytics chatbot: routing, SQL guard, read-only DB access, Bedrock/Gemini/fake providers, telemetry, FastAPI + chat page
 config/chat_catalog.yaml       chatbot metadata: curated views, columns, known values, examples
 triage/                        Pipeline Triage Agent: Converse tool-use loop, read-only tools and session, CLI
 infra/terraform/               S3, IAM (COPY role + pipeline user), Redshift Serverless, usage limit
 tests/, airflow/tests/         unit + DAG integrity tests
+.devcontainer/                 Codespace: Python 3.11, docker-in-docker, sshd, gh, Terraform, AWS CLI, Claude Code
+docker-compose.yml             local stack, by profile: app (chatbot, Postgres, Redis), obs (OTel, Jaeger, Prometheus, Grafana), load (k6)
+docker/                        chatbot image + Postgres seed (chat.* views, read-only chat_reader)
+observability/                 OTel Collector, Prometheus and Grafana config; golden-signals dashboard JSON
+loadtest/chat.js               k6 load test (1x / 10x)
+scripts/                       export_chat_views.py (Redshift -> Postgres seed), screenshots.py (README images)
+docs/adr/, docs/m1-what-broke.md   decisions and lessons per milestone
 ```

@@ -4,6 +4,8 @@
 #
 # app: the chatbot on the fake LLM (no model, no cost), a Postgres copy of the chat.* views
 #      (seeded by scripts/export_chat_views.py) and Redis (the cache, from milestone 2).
+# obs: OpenTelemetry Collector -> Jaeger (traces), Prometheus (metrics), Grafana (dashboards in
+#      observability/). Start both:  docker compose --profile app --profile obs up -d --build
 # Passwords below are local-only defaults for throwaway containers, not real credentials.
 
 services:
@@ -53,9 +55,58 @@ services:
       CHAT_REDSHIFT_USER: chat_reader
       CHAT_REDSHIFT_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
       REDIS_URL: redis://redis:6379/0
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     deploy:
       resources:
         limits: { memory: 512m }
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.111.0
+    profiles: ["obs"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    depends_on: [jaeger]
+    deploy:
+      resources:
+        limits: { memory: 128m }
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: ["obs"]
+    command: ["--memory.max-traces=20000"]
+    ports: ["16686:16686"]
+    deploy:
+      resources:
+        limits: { memory: 384m }
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["obs"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: ["obs"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana-local}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"        # read-only viewing in a private Codespace port
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/golden_signals.json
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus, jaeger]
+    deploy:
+      resources:
+        limits: { memory: 256m }

@@ -1,0 +1,21 @@
+# OpenTelemetry Collector: the chatbot sends OTLP here; the collector batches and forwards to Jaeger.
+# Keeping a collector in the path (instead of chatbot -> Jaeger directly) means the backend can change
+# without touching the app.
+receivers:
+  otlp:
+    protocols:
+      http: { endpoint: 0.0.0.0:4318 }
+      grpc: { endpoint: 0.0.0.0:4317 }
+processors:
+  memory_limiter: { check_interval: 1s, limit_mib: 100 }
+  batch: {}
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls: { insecure: true }
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger]

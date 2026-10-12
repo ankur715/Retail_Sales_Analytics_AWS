@@ -4,7 +4,7 @@
     python -m triage.run C101_R201_20261008T120000 --write    # ...and save it to etl.load_audit
 
 The pipeline, failed task and error come from the load's audit row (read-only).
-Needs LLM_PROVIDER other than none, Bedrock model access, and the triage_reader user.
+Needs LLM_PROVIDER=gemini or bedrock (none and fake turn it off), Bedrock model access, and the triage_reader user.
 """
 import argparse
 import logging
@@ -24,7 +24,7 @@ def main() -> None:
     logging.getLogger("botocore").setLevel(logging.WARNING)   # only the agent's steps, not AWS SDK chatter
 
     if not agent.enabled():
-        raise SystemExit("LLM_PROVIDER=none: the triage agent is turned off")
+        raise SystemExit(f"LLM_PROVIDER={config.LLM_PROVIDER}: the triage agent is turned off")
     session = ReadOnlySession()
     try:
         rows = session.query("load_audit", load_id=args.load_id)

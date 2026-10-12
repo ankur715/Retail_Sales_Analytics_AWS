@@ -15,7 +15,8 @@ Guardrails:
   - tools are read-only and bound to the failed load; no free-form SQL
   - the note is a SUGGESTION: nothing here changes data, metadata or the DAG;
     a person reviews it (etl.load_audit.triage_note) and applies any fix
-  - LLM_PROVIDER=none skips the agent entirely (CI, tests, fresh clones)
+  - LLM_PROVIDER=none or fake skips the agent entirely (CI, tests, fresh
+    clones, load tests), so a fake chatbot setup never reaches Bedrock
   - triage_failed_load() never raises, so an agent problem can't hide or
     replace the pipeline's own failure
 """
@@ -85,7 +86,7 @@ class TriageResult:
 
 
 def enabled() -> bool:
-    return config.LLM_PROVIDER != "none"
+    return config.LLM_PROVIDER not in ("none", "fake")
 
 
 def model_id() -> str:
@@ -202,7 +203,7 @@ def triage_failed_load(load_id: str, pipeline_id: str, failed_task: str, error: 
         log.exception("triage of %s failed; the original pipeline failure is unaffected", load_id)
         return TriageResult(status="error", model=model_id(), note=None)
     if result.status == "skipped":
-        log.info("triage of %s skipped: LLM_PROVIDER=none", load_id)
+        log.info("triage of %s skipped: LLM_PROVIDER=%s", load_id, config.LLM_PROVIDER)
         return result
     try:
         if result.note:

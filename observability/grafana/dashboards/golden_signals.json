@@ -124,7 +124,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(chatbot_requests_total{route=\"/api/chat\",status=~\"5..\"}[1m])) / sum(rate(chatbot_requests_total{route=\"/api/chat\"}[1m]))"
+          "expr": "(sum(rate(chatbot_requests_total{route=\"/api/chat\",status=~\"5..\"}[1m])) or vector(0)) / sum(rate(chatbot_requests_total{route=\"/api/chat\"}[1m]))"
         }
       ]
     },

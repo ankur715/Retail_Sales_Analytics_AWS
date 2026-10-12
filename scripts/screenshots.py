@@ -47,8 +47,8 @@ def typical_trace(start: int, end: int) -> str:
 
 def k6_svg() -> Path:
     runs = {load: json.loads((RESULTS / f"k6_{load}.json").read_text()) for load in ("1x", "10x")}
-    table = Table(title="k6: chatbot load test (fake LLM, ~800 ms per model call, cache bypassed)",
-                  title_style="bold", header_style="bold cyan")
+    table = Table(title="k6 load test: chatbot on the fake LLM", title_style="bold", header_style="bold cyan",
+                  caption="~800 ms per model call, answer cache bypassed")
     table.add_column("metric")
     for load in runs:
         table.add_column(load, justify="right")
@@ -69,7 +69,7 @@ def k6_svg() -> Path:
     ]
     for label, fn in rows:
         table.add_row(label, *(fn(r) for r in runs.values()))
-    console = Console(record=True, width=90)
+    console = Console(record=True, width=48)
     console.print(table)
     out = RESULTS / "k6_summary.svg"
     console.save_svg(str(out), title="k6 load test")
@@ -83,19 +83,22 @@ def main() -> None:
         browser = p.chromium.launch()
         page = browser.new_page(viewport=VIEWPORT)
 
-        page.goto(f"{GRAFANA}/d/chatbot-golden-signals/?orgId=1&from={(start - 60) * 1000}"
-                  f"&to={(end + 60) * 1000}&theme=light&kiosk&refresh=")
+        # end the range while 10x is still running, so the tiles show the 10x values, not the wind-down
+        page.goto(f"{GRAFANA}/d/chatbot-golden-signals/?orgId=1&from={(start - 30) * 1000}"
+                  f"&to={(end - 20) * 1000}&theme=light&kiosk&refresh=")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(5000)
-        page.screenshot(path=str(PICS / "obs_grafana_golden_signals.jpg"), type="jpeg", quality=85)
+        page.screenshot(path=str(PICS / "obs_grafana_golden_signals.jpg"), type="jpeg", quality=85,
+                        clip={"x": 0, "y": 60, "width": 1440, "height": 764})   # signals + traffic/latency + steps
 
         page.goto(f"{JAEGER}/trace/{typical_trace(mid, end)}")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(2000)
-        page.screenshot(path=str(PICS / "obs_jaeger_llm_span.jpg"), type="jpeg", quality=85)
+        page.screenshot(path=str(PICS / "obs_jaeger_llm_span.jpg"), type="jpeg", quality=85,
+                        clip={"x": 0, "y": 0, "width": 1440, "height": 620})
 
-        page.set_viewport_size({"width": 1000, "height": 600})
-        page.goto(svg.as_uri())
+        page.set_content("<html><body style='margin:0;background:#fff'><style>svg{width:900px;height:auto;"
+                         "display:block}</style>" + svg.read_text() + "</body></html>")
         page.wait_for_timeout(500)
         page.locator("svg").screenshot(path=str(PICS / "loadtest_k6_10x.jpg"), type="jpeg", quality=85)
         browser.close()

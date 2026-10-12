@@ -110,3 +110,13 @@ services:
     deploy:
       resources:
         limits: { memory: 384m }
+
+  # load: k6, run on demand (see loadtest/chat.js); exits when the test ends.
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["load"]
+    volumes:
+      - ./loadtest:/scripts
+    deploy:
+      resources:
+        limits: { memory: 256m }

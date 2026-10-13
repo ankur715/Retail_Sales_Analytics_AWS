@@ -20,7 +20,7 @@ def fake_chat(monkeypatch):
     monkeypatch.setattr(llm.config, "LLM_PROVIDER", "fake")
     monkeypatch.setattr(llm.config, "FAKE_LLM_LATENCY_MS", 0.0)
     monkeypatch.setattr(llm.config, "FAKE_LLM_ERROR_RATE", 0.0)
-    monkeypatch.setattr(chat_app, "_cache", {})
+    monkeypatch.setattr(chat_app.db, "data_version", lambda: "2026-10-25 06:00:00")
     monkeypatch.setattr(chat_app.db, "known_values", lambda cols: {})
     monkeypatch.setattr(chat_app.db, "data_as_of", lambda: "2026-10-24")
     monkeypatch.setattr(chat_app.db.redshift, "get_connection", lambda **kw: FakeConn())

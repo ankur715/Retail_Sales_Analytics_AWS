@@ -1,15 +1,22 @@
-"""Retake the milestone-1 README screenshots from the running Codespace stack.
+"""Retake the README screenshots from the running Codespace stack.
 
 Runs in the Codespace only (headless Chromium is too heavy for the laptop):
   .venv/bin/pip install playwright rich && .venv/bin/python -m playwright install --with-deps chromium
-  .venv/bin/python -m scripts.screenshots
+  .venv/bin/python -m scripts.screenshots --milestone 1   (or 2)
 
-Needs `docker compose --profile app --profile obs up` and a finished k6 run
-(loadtest/results/{start,mid,end} and k6_{1x,10x}.json). Writes 1440x900 JPEGs to pics/:
+Needs `docker compose --profile app --profile obs up`. Writes 1440x900-wide JPEGs to pics/.
+
+Milestone 1 -- after the k6 1x then 10x runs (loadtest/results/{start,mid,end}, k6_{1x,10x}.json):
   obs_grafana_golden_signals.jpg  the dashboard across the 1x then 10x runs
   obs_jaeger_llm_span.jpg         a typical 10x trace: the LLM spans dominate
   loadtest_k6_10x.jpg             k6 results, 1x vs 10x, rendered with rich
+Milestone 2 -- after a CACHE=on k6 run (loadtest/results/{cache_start,cache_end}) and
+scripts.idempotency_demo (loadtest/results/idempotency.svg):
+  api_swagger_v1.jpg              /docs: the /v1 routes, Idempotency-Key, legacy /api deprecated
+  cache_hit_vs_miss.jpg           Grafana: answer latency on a cache hit vs a miss, hit ratio
+  idempotency_replay.jpg          the demo's table: replay, 422, 409, model runs
 """
+import argparse
 import json
 import statistics
 import urllib.request
@@ -21,7 +28,7 @@ from rich.table import Table
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS, PICS = ROOT / "loadtest" / "results", ROOT / "pics"
-GRAFANA, JAEGER = "http://localhost:3000", "http://localhost:16686"
+GRAFANA, JAEGER, CHATBOT = "http://localhost:3000", "http://localhost:16686", "http://localhost:8000"
 VIEWPORT = {"width": 1440, "height": 900}
 
 
@@ -31,7 +38,7 @@ def _epoch(name: str) -> int:
 
 def typical_trace(start: int, end: int) -> str:
     """A 10x-run trace near the median duration whose LLM spans take most of the time."""
-    url = (f"{JAEGER}/api/traces?service=retail-chatbot&operation=POST%20/api/chat&limit=500"
+    url = (f"{JAEGER}/api/traces?service=retail-chatbot&operation=POST%20/v1/chat&limit=500"
            f"&start={start * 1_000_000}&end={end * 1_000_000}")
     traces = json.load(urllib.request.urlopen(url))["data"]
     rows = []
@@ -76,7 +83,49 @@ def k6_svg() -> Path:
     return out
 
 
-def main() -> None:
+def svg_shot(page, svg: Path, out: Path) -> None:
+    page.set_content("<html><body style='margin:0;background:#fff'><style>svg{width:900px;height:auto;"
+                     "display:block}</style>" + svg.read_text() + "</body></html>")
+    page.wait_for_timeout(500)
+    page.locator("svg").screenshot(path=str(out), type="jpeg", quality=85)
+
+
+def milestone2() -> list[str]:
+    start, end = _epoch("cache_start"), _epoch("cache_end")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=VIEWPORT)
+
+        # Swagger: every route collapsed except POST /v1/chat, opened to show the Idempotency-Key header
+        page.goto(f"{CHATBOT}/docs")
+        page.wait_for_selector(".opblock")
+        page.locator(".opblock-post", has_text="/v1/chat").first.locator(".opblock-summary").click()
+        page.wait_for_selector("text=Idempotency-Key")
+        # keep just its parameters, so the deprecated /api group still fits below
+        page.add_style_tag(content=".opblock-section-request-body, .responses-wrapper, .opblock-section-header"
+                                   ":has(+ .opblock-description-wrapper) {display: none !important}")
+        page.wait_for_timeout(500)
+        page.screenshot(path=str(PICS / "api_swagger_v1.jpg"), type="jpeg", quality=85,
+                        clip={"x": 0, "y": 0, "width": 1440, "height": 900})
+
+        # Grafana: the milestone 2 row (hit vs miss latency, hit ratio, replays) over the cache run.
+        # Grafana only renders panels inside the viewport, so this page is tall enough to hold that row.
+        page = browser.new_page(viewport={"width": 1440, "height": 1500})
+        page.goto(f"{GRAFANA}/d/chatbot-golden-signals/?orgId=1&from={(start - 30) * 1000}"
+                  f"&to={(end + 10) * 1000}&theme=light&kiosk&refresh=")
+        page.wait_for_load_state("networkidle")
+        header = page.get_by_text("Answer latency: cache hit vs miss", exact=False).first
+        page.wait_for_timeout(5000)
+        top = header.bounding_box()["y"] - 12
+        page.screenshot(path=str(PICS / "cache_hit_vs_miss.jpg"), type="jpeg", quality=85,
+                        clip={"x": 0, "y": max(top, 0), "width": 1440, "height": 330})
+
+        svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / "idempotency.svg", PICS / "idempotency_replay.jpg")
+        browser.close()
+    return ["api_swagger_v1", "cache_hit_vs_miss", "idempotency_replay"]
+
+
+def milestone1() -> list[str]:
     start, mid, end = _epoch("start"), _epoch("mid"), _epoch("end")
     svg = k6_svg()
     with sync_playwright() as p:
@@ -97,12 +146,16 @@ def main() -> None:
         page.screenshot(path=str(PICS / "obs_jaeger_llm_span.jpg"), type="jpeg", quality=85,
                         clip={"x": 0, "y": 0, "width": 1440, "height": 620})
 
-        page.set_content("<html><body style='margin:0;background:#fff'><style>svg{width:900px;height:auto;"
-                         "display:block}</style>" + svg.read_text() + "</body></html>")
-        page.wait_for_timeout(500)
-        page.locator("svg").screenshot(path=str(PICS / "loadtest_k6_10x.jpg"), type="jpeg", quality=85)
+        svg_shot(page, svg, PICS / "loadtest_k6_10x.jpg")
         browser.close()
-    for name in ("obs_grafana_golden_signals", "obs_jaeger_llm_span", "loadtest_k6_10x"):
+    return ["obs_grafana_golden_signals", "obs_jaeger_llm_span", "loadtest_k6_10x"]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--milestone", type=int, choices=(1, 2), default=2)
+    names = {1: milestone1, 2: milestone2}[parser.parse_args().milestone]()
+    for name in names:
         print(name, f"{(PICS / f'{name}.jpg').stat().st_size // 1024} KB")
 
 

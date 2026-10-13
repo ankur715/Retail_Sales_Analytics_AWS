@@ -19,6 +19,26 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Unit tests (no AWS, no Gemini -- S3 is moto, Redshift and Gemini calls are faked, APIs use TestClient)
         run: pytest -q tests
+      - name: gRPC stubs match sqlgen.proto (regenerate with the command in its header)
+        run: |
+          python -m grpc_tools.protoc -I . --python_out=. --pyi_out=. --grpc_python_out=. sqlgen/sqlgen.proto
+          git diff --exit-code -- sqlgen/
+
+  migration-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needs the base branch to diff against
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install psycopg2-binary python-dotenv
+      - name: No edited applied migrations, no unannotated drops / renames / unbounded deletes
+        env:
+          # PRs compare with their target branch; pushes with the commit before the push
+          MIGRATION_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: python -m scripts.check_migrations
 
   dag-tests:
     runs-on: ubuntu-latest

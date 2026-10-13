@@ -6,3 +6,6 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["chatbot:8000"]
+  - job_name: sqlgen          # milestone 2: the write_sql step's metrics live in the sqlgen service
+    static_configs:
+      - targets: ["sqlgen:9101"]

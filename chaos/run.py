@@ -231,12 +231,16 @@ def main() -> int:
             rows.append(summarize(name, start, recovered, time.time()))
             print("  ", rows[-1])
             time.sleep(10)                                   # quiet gap between experiments
-    finally:
+    finally:   # every cleanup step runs even if one fails: never leave Argo CD frozen
         (RESULTS / "chaos_end").write_text(str(int(time.time())))
         proc.terminate()
-        kubectl("delete", "pod", TRAFFIC_POD, "--ignore-not-found", "--wait=false", check=False)
-        set_error_rate("0")
-        freeze_deploys(False)          # back to automated sync; the app returns to Synced
+        for cleanup in (lambda: kubectl("delete", "pod", TRAFFIC_POD, "--ignore-not-found", "--wait=false"),
+                        lambda: set_error_rate("0"),
+                        lambda: freeze_deploys(False)):   # back to automated sync; the app returns to Synced
+            try:
+                cleanup()
+            except Exception as e:
+                print(f"cleanup step failed: {e}")
     (RESULTS / "chaos.json").write_text(json.dumps({"experiments": rows, "snapshots": snapshots}, indent=2))
     render(rows)
     Console().print(f"{sum(r['pass'] for r in rows)}/{len(rows)} experiments passed")

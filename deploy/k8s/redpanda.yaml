@@ -12,6 +12,7 @@ spec:
     metadata:
       labels: { app: redpanda }
     spec:
+      enableServiceLinks: false
       containers:
         - name: redpanda
           image: docker.redpanda.com/redpandadata/redpanda:v24.2.7

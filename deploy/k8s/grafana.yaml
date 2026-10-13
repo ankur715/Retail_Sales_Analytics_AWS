@@ -10,6 +10,7 @@ spec:
     metadata:
       labels: { app: grafana }
     spec:
+      enableServiceLinks: false
       containers:
         - name: grafana
           image: grafana/grafana:11.3.0

@@ -18,6 +18,9 @@ spec:
     metadata:
       labels: { app: sqlgen }
     spec:
+      # No Docker-link env vars (SQLGEN_PORT=tcp://..., POSTGRES_PORT=...): they collide with real
+      # settings -- a Service named sqlgen broke sqlgen's own SQLGEN_PORT.
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 20
       containers:
         - name: sqlgen

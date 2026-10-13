@@ -14,6 +14,7 @@ spec:
     metadata:
       labels: { app: chatbot }
     spec:
+      enableServiceLinks: false
       containers:
         - name: chatbot
           image: retail-chatbot

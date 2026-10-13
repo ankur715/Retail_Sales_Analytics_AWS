@@ -99,7 +99,7 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:1.62.0
     profiles: ["obs"]
-    command: ["--memory.max-traces=20000"]
+    command: ["--memory.max-traces=8000"]   # ~12 spans per trace across two services; 20k OOM-killed it at 384 MB
     ports: ["16686:16686"]
     deploy:
       resources:

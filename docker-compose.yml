@@ -2,8 +2,9 @@
 # Start only the profile a task needs:   docker compose --profile app up -d --build
 # Stop it when done:                     docker compose --profile app down
 #
-# app: the chatbot on the fake LLM (no model, no cost), a Postgres copy of the chat.* views
-#      (seeded by scripts/export_chat_views.py) and Redis (the cache, from milestone 2).
+# app: the chatbot on the fake LLM (no model, no cost), the sqlgen gRPC service it calls to write
+#      SQL, a Postgres copy of the chat.* views (seeded by scripts/export_chat_views.py) and Redis
+#      (answer cache + Idempotency-Key records).
 # obs: OpenTelemetry Collector -> Jaeger (traces), Prometheus (metrics), Grafana (dashboards in
 #      observability/). Start both:  docker compose --profile app --profile obs up -d --build
 # Passwords below are local-only defaults for throwaway containers, not real credentials.
@@ -55,13 +56,34 @@ services:
       CHAT_REDSHIFT_USER: chat_reader
       CHAT_REDSHIFT_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
       REDIS_URL: redis://redis:6379/0
+      SQLGEN_ADDR: sqlgen:50051
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      sqlgen: { condition: service_healthy }
     deploy:
       resources:
         limits: { memory: 512m }
+
+  # SQL generation over gRPC (sqlgen/): the write_sql step, same image, its own process.
+  sqlgen:
+    build: { context: ., dockerfile: docker/chatbot.Dockerfile }
+    profiles: ["app"]
+    command: ["python", "-m", "sqlgen.server"]
+    environment:
+      ENV: dev
+      LLM_PROVIDER: fake
+      FAKE_LLM_LATENCY_MS: ${FAKE_LLM_LATENCY_MS:-800}
+      FAKE_LLM_ERROR_RATE: ${FAKE_LLM_ERROR_RATE:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=2)"]
+      interval: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { memory: 256m }
 
   otel-collector:
     image: otel/opentelemetry-collector:0.111.0

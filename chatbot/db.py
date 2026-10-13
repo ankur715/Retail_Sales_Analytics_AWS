@@ -57,3 +57,10 @@ def known_values(columns_by_view: dict[str, list[str]]) -> dict[str, list]:
 def data_as_of() -> str | None:
     rows = query("SELECT MAX(week_ending) FROM chat.v_calendar")["rows"]
     return rows[0][0] if rows else None
+
+
+def data_version():
+    """When the data behind the views last changed: the latest successful load. The answer
+    cache keys on it, so a new load retires every cached answer (chatbot/cache.py)."""
+    rows = query("SELECT MAX(last_successful_load_at) FROM chat.v_data_freshness")["rows"]
+    return rows[0][0] if rows else None

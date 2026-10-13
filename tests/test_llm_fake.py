@@ -17,7 +17,7 @@ def fake_provider(monkeypatch):
 @pytest.fixture
 def no_db(monkeypatch):
     queries = []
-    monkeypatch.setattr(chat_app, "_cache", {})
+    monkeypatch.setattr(chat_app.db, "data_version", lambda: "2026-10-25 06:00:00")
     monkeypatch.setattr(chat_app.db, "known_values", lambda cols: {})
     monkeypatch.setattr(chat_app.db, "data_as_of", lambda: "2026-10-24")
 

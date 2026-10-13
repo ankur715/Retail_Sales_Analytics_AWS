@@ -3,7 +3,8 @@
   "title": "Chatbot: golden signals",
   "tags": [
     "chatbot",
-    "milestone-1"
+    "milestone-1",
+    "milestone-2"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -63,7 +64,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(chatbot_requests_total{route=\"/api/chat\"}[1m]))"
+          "expr": "sum(rate(chatbot_requests_total{route=~\"/v1/chat|/api/chat\"}[1m]))"
         }
       ]
     },
@@ -124,7 +125,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(sum(rate(chatbot_requests_total{route=\"/api/chat\",status=~\"5..\"}[1m])) or vector(0)) / sum(rate(chatbot_requests_total{route=\"/api/chat\"}[1m]))"
+          "expr": "(sum(rate(chatbot_requests_total{route=~\"/v1/chat|/api/chat\",status=~\"5..\"}[1m])) or vector(0)) / sum(rate(chatbot_requests_total{route=~\"/v1/chat|/api/chat\"}[1m]))"
         }
       ]
     },
@@ -185,7 +186,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_request_seconds_bucket{route=\"/api/chat\"}[1m])))"
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_request_seconds_bucket{route=~\"/v1/chat|/api/chat\"}[1m])))"
         }
       ]
     },
@@ -294,7 +295,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (status) (rate(chatbot_requests_total{route=\"/api/chat\"}[1m]))",
+          "expr": "sum by (status) (rate(chatbot_requests_total{route=~\"/v1/chat|/api/chat\"}[1m]))",
           "legendFormat": "{{status}}"
         }
       ]
@@ -302,7 +303,7 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Latency percentiles (/api/chat)",
+      "title": "Latency percentiles (chat)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -343,7 +344,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(chatbot_request_seconds_bucket{route=\"/api/chat\"}[1m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(chatbot_request_seconds_bucket{route=~\"/v1/chat|/api/chat\"}[1m])))",
           "legendFormat": "p50"
         },
         {
@@ -352,7 +353,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_request_seconds_bucket{route=\"/api/chat\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_request_seconds_bucket{route=~\"/v1/chat|/api/chat\"}[1m])))",
           "legendFormat": "p95"
         },
         {
@@ -361,7 +362,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(chatbot_request_seconds_bucket{route=\"/api/chat\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(chatbot_request_seconds_bucket{route=~\"/v1/chat|/api/chat\"}[1m])))",
           "legendFormat": "p99"
         }
       ]
@@ -568,6 +569,184 @@
           },
           "expr": "sum(rate(chatbot_cache_total{result=\"hit\"}[1m])) / sum(rate(chatbot_cache_total[1m]))",
           "legendFormat": "cache hit ratio"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Answer latency: cache hit vs miss (milestone 2)",
+      "description": "Time inside the chat handler. A hit (same question, same data version, within 15 min) skips all three model calls and the query.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 16,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "stacking": {
+              "mode": "none"
+            },
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(chatbot_answer_seconds_bucket{cache=\"miss\"}[1m])))",
+          "legendFormat": "miss p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_answer_seconds_bucket{cache=\"miss\"}[1m])))",
+          "legendFormat": "miss p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(chatbot_answer_seconds_bucket{cache=\"hit\"}[1m])))",
+          "legendFormat": "hit p50"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_answer_seconds_bucket{cache=\"hit\"}[1m])))",
+          "legendFormat": "hit p95"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Cache hit ratio",
+      "description": "Share of chat questions answered from the Redis cache (last 1 min).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 28,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(chatbot_cache_total{result=\"hit\"}[1m])) / sum(rate(chatbot_cache_total[1m]))"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Idempotent replays / s",
+      "description": "Retries answered from a stored response (Idempotency-Key), last 1 min.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 32,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(chatbot_idempotency_total{result=\"replay\"}[1m])) or vector(0)"
         }
       ]
     }

@@ -116,7 +116,7 @@ async function ask(text) {
   q.value = ""; send.disabled = true;
   reply.scrollIntoView({behavior: "smooth", block: "end"});
   try {
-    const res = await fetch("/api/chat", {method: "POST", headers: {"Content-Type": "application/json"},
+    const res = await fetch("/v1/chat", {method: "POST", headers: {"Content-Type": "application/json"},
                                            body: JSON.stringify({message: text})});
     const d = await res.json();
     reply.textContent = "";

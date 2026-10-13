@@ -1,0 +1,27 @@
+// SQL generation as its own service (milestone 2): the chatbot's write_sql step behind gRPC.
+// Regenerate the Python stubs after editing (CI fails if they're stale):
+//   python -m grpc_tools.protoc -I . --python_out=. --pyi_out=. --grpc_python_out=. sqlgen/sqlgen.proto
+syntax = "proto3";
+
+package retail.sqlgen.v1;
+
+service SqlGenerator {
+  // Question + ONLY the routed views' details -> one SQL query (not yet validated or run).
+  // LLM failures come back as status codes: UNAVAILABLE (busy), RESOURCE_EXHAUSTED (quota),
+  // FAILED_PRECONDITION (config), PERMISSION_DENIED (declined).
+  rpc WriteSql(WriteSqlRequest) returns (SqlPlan);
+}
+
+message WriteSqlRequest {
+  string question = 1;
+  repeated string views = 2;    // fully qualified, e.g. chat.v_sales_by_week
+  string details = 3;           // columns, known values and examples of those views
+  string previous_error = 4;    // set on the repair round: why the last SQL failed
+  string previous_sql = 5;
+}
+
+message SqlPlan {
+  string sql = 1;               // empty when the question can't be answered from these views
+  string explanation = 2;
+  string unanswerable_reason = 3;
+}

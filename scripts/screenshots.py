@@ -101,6 +101,9 @@ def milestone2() -> list[str]:
         page.wait_for_selector(".opblock")
         page.locator(".opblock-post", has_text="/v1/chat").first.locator(".opblock-summary").click()
         page.wait_for_selector("text=Idempotency-Key")
+        # keep just its parameters, so the deprecated /api group still fits below
+        page.add_style_tag(content=".opblock-section-request-body, .responses-wrapper, .opblock-section-header"
+                                   ":has(+ .opblock-description-wrapper) {display: none !important}")
         page.wait_for_timeout(500)
         page.screenshot(path=str(PICS / "api_swagger_v1.jpg"), type="jpeg", quality=85,
                         clip={"x": 0, "y": 0, "width": 1440, "height": 900})

@@ -1,5 +1,6 @@
 # promtool unit tests for slo.yml:  promtool test rules observability/rules/slo_test.yml
 # (CI runs this in the prom/prometheus image; see .github/workflows/ci.yml)
+# Label values are copied from a real /metrics scrape (e.g. le="8.0", as the Python client writes it).
 rule_files: [slo.yml]
 evaluation_interval: 1m
 

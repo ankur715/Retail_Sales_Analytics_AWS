@@ -105,18 +105,19 @@ def milestone2() -> list[str]:
         page.screenshot(path=str(PICS / "api_swagger_v1.jpg"), type="jpeg", quality=85,
                         clip={"x": 0, "y": 0, "width": 1440, "height": 900})
 
-        # Grafana: the milestone 2 row (hit vs miss latency, hit ratio, replays) over the cache run
+        # Grafana: the milestone 2 row (hit vs miss latency, hit ratio, replays) over the cache run.
+        # Grafana only renders panels inside the viewport, so this page is tall enough to hold that row.
+        page = browser.new_page(viewport={"width": 1440, "height": 1500})
         page.goto(f"{GRAFANA}/d/chatbot-golden-signals/?orgId=1&from={(start - 30) * 1000}"
                   f"&to={(end + 10) * 1000}&theme=light&kiosk&refresh=")
         page.wait_for_load_state("networkidle")
         header = page.get_by_text("Answer latency: cache hit vs miss", exact=False).first
-        header.scroll_into_view_if_needed()
         page.wait_for_timeout(5000)
         top = header.bounding_box()["y"] - 12
         page.screenshot(path=str(PICS / "cache_hit_vs_miss.jpg"), type="jpeg", quality=85,
                         clip={"x": 0, "y": max(top, 0), "width": 1440, "height": 330})
 
-        svg_shot(page, RESULTS / "idempotency.svg", PICS / "idempotency_replay.jpg")
+        svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / "idempotency.svg", PICS / "idempotency_replay.jpg")
         browser.close()
     return ["api_swagger_v1", "cache_hit_vs_miss", "idempotency_replay"]
 

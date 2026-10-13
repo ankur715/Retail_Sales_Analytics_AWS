@@ -41,6 +41,13 @@ def handle(raw: bytes | None) -> str:
     return "invalidated"
 
 
+def classify(error) -> str:
+    """A topic that doesn't exist yet is normal before the first load (it's created by the
+    first publish); anything else from the broker is a real problem."""
+    from confluent_kafka import KafkaError
+    return "topic_pending" if error.code() == KafkaError.UNKNOWN_TOPIC_OR_PART else "broker_error"
+
+
 def consumer():
     from confluent_kafka import Consumer
     return Consumer({"bootstrap.servers": config.EVENTS_BOOTSTRAP,
@@ -61,7 +68,7 @@ def _run() -> None:
             if msg is None:
                 continue
             if msg.error():
-                telemetry.EVENTS.labels(EVENT, "broker_error").inc()
+                telemetry.EVENTS.labels(EVENT, classify(msg.error())).inc()
                 log.warning("event consumer: %s", msg.error())
                 continue
             telemetry.EVENTS.labels(EVENT, handle(msg.value())).inc()

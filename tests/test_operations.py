@@ -106,7 +106,9 @@ class FakeMsg:
 
 
 def test_listener_loop_handles_messages_and_survives_broker_errors(monkeypatch):
-    msgs = [FakeMsg(None, error="broker down"), FakeMsg(json.dumps(events.build(CTX)).encode()), None]
+    from confluent_kafka import KafkaError
+    msgs = [FakeMsg(None, error=KafkaError(KafkaError._TRANSPORT)), FakeMsg(json.dumps(events.build(CTX)).encode()),
+            None]
 
     class FakeConsumer:
         def subscribe(self, topics):
@@ -126,6 +128,12 @@ def test_listener_loop_handles_messages_and_survives_broker_errors(monkeypatch):
     chat_events._stop.clear()
     chat_events._run()
     assert telemetry.EVENTS.labels("load_completed", "invalidated")._value.get() == before + 1
+
+
+def test_missing_topic_before_the_first_load_is_not_a_broker_error():
+    from confluent_kafka import KafkaError
+    assert chat_events.classify(KafkaError(KafkaError.UNKNOWN_TOPIC_OR_PART)) == "topic_pending"
+    assert chat_events.classify(KafkaError(KafkaError._TRANSPORT)) == "broker_error"
 
 
 def test_listener_starts_only_with_a_broker(monkeypatch):

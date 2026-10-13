@@ -296,4 +296,6 @@ def test_channel_retries_unavailable_and_reconnects_fast():
     policy = json.loads(sqlgen_client.SERVICE_CONFIG)
     assert policy["methodConfig"][0]["retryPolicy"]["retryableStatusCodes"] == ["UNAVAILABLE"]
     assert grpc.StatusCode.UNAVAILABLE in sqlgen_client.KINDS
-    assert dict(sqlgen_client.CHANNEL_OPTIONS)["grpc.max_reconnect_backoff_ms"] <= 1000   # not gRPC's 2 min
+    options = dict(sqlgen_client.CHANNEL_OPTIONS)
+    assert options["grpc.max_reconnect_backoff_ms"] <= 1000      # not gRPC's 2 min
+    assert options["grpc.min_reconnect_backoff_ms"] <= 1000      # = the connect timeout; default 20 s

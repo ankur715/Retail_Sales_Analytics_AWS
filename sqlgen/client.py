@@ -27,9 +27,13 @@ SERVICE_CONFIG = json.dumps({
                       "retryPolicy": {"maxAttempts": 3, "initialBackoff": "0.1s", "maxBackoff": "1s",
                                       "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]}}],
 })
-# Reconnect fast after the connection drops (its pod died, or the server aged it out): gRPC's
-# default backoff grows to 2 min, during which every call would fail without trying.
+# Reconnect fast after the connection drops (its pod died, or the server aged it out):
+#  - min_reconnect_backoff is also the connect TIMEOUT, 20 s by default. Right after a pod dies,
+#    a connect can go to its vanished IP and hang silently for all 20 s, failing every call
+#    meanwhile -- the chaos test measured exactly that. 1 s is plenty inside a cluster.
+#  - the backoff between attempts would otherwise grow to 2 min.
 CHANNEL_OPTIONS = [("grpc.service_config", SERVICE_CONFIG), ("grpc.enable_retries", 1),
+                   ("grpc.min_reconnect_backoff_ms", 1000),
                    ("grpc.initial_reconnect_backoff_ms", 100), ("grpc.max_reconnect_backoff_ms", 1000)]
 _stub = None
 _lock = threading.Lock()

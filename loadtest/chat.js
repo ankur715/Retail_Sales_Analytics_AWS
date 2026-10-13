@@ -65,7 +65,7 @@ export default function () {
     const retry = ask(q, key, "retry");
     check(retry, {
       "retry replayed": (r) => r.headers["Idempotent-Replayed"] === "true",
-      "retry same answer": (r) => JSON.stringify(r.json()) === JSON.stringify(res.json()),
+      "retry same answer": (r) => r.body === res.body,   // byte-identical, not just equal
     });
   }
 }

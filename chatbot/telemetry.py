@@ -13,7 +13,8 @@ Metrics (Prometheus, GET /metrics), the four golden signals:
   saturation  chatbot_requests_in_flight
 plus chatbot_cache_total{result} and chatbot_answer_seconds{cache} (hit vs miss latency) for the answer cache, chatbot_idempotency_total{result} for
 Idempotency-Key handling, and chatbot_store_errors_total{op} when Redis (or the data-version
-lookup) fails and the request carries on without it.
+lookup) fails and the request carries on without it, and chatbot_events_total{event,result} for
+load_completed events (milestone 3).
 
 Spans never carry question text, answers or result rows -- only the step, model, view
 names, row counts and the validated SQL.
@@ -35,11 +36,12 @@ LATENCY = Histogram("chatbot_request_seconds", "HTTP request latency", ["route"]
 IN_FLIGHT = Gauge("chatbot_requests_in_flight", "Requests being handled right now")
 STEP_SECONDS = Histogram("chatbot_step_seconds", "Time per chat step", ["step"], buckets=SECONDS)
 STEP_ERRORS = Counter("chatbot_step_errors_total", "Chat steps that raised", ["step"])
-CACHE = Counter("chatbot_cache_total", "Answer cache lookups", ["result"])
+CACHE = Counter("chatbot_cache_total", "Answer cache lookups (hit / miss; stale = fallback served)", ["result"])
 # Hits take milliseconds, so this one gets finer low buckets than SECONDS
 ANSWER_SECONDS = Histogram("chatbot_answer_seconds", "Time to answer a chat question, by cache result", ["cache"],
                            buckets=(0.001, 0.0025, 0.005) + SECONDS)
 IDEMPOTENCY = Counter("chatbot_idempotency_total", "Requests carrying an Idempotency-Key", ["result"])
+EVENTS = Counter("chatbot_events_total", "load_completed events received, by outcome", ["event", "result"])
 STORE_ERRORS = Counter("chatbot_store_errors_total", "Store or data-version failures the request survived", ["op"])
 UNTRACKED = {"/metrics", "/api/health", "/v1/health"}
 

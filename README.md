@@ -34,6 +34,7 @@ to approve. See [Pipeline Triage Agent](#pipeline-triage-agent).
 | **Analytics chatbot** | Plain-English question → SQL on curated views (read-only user, validated SQL) → answer with its data | FastAPI, Claude on Bedrock or Gemini |
 | **Pipeline Triage Agent** | When a load fails, investigates with read-only tools and writes a diagnosis and a fix for a person to approve | Bedrock Converse tool use, Nova Lite (Claude Haiku 4.5 optional) |
 | **Observability** | A trace span per chatbot step, a golden-signals dashboard and a k6 load test at 1x and 10x: the three LLM calls are 99% of latency, the database about 1% | OpenTelemetry, Jaeger, Prometheus, Grafana, k6, Docker Compose in a Codespace |
+| **Production operations** | Deployed to Kubernetes (kind) by Argo CD from git; a `load_completed` event on Redpanda retires cached answers in under a second; SLOs with burn-rate alerts; chaos tests (Postgres, sqlgen, Redis killed, 50% model errors) pass with zero 500s, serving stale answers instead of errors | Kubernetes, Argo CD, Redpanda, Prometheus rules, Grafana |
 | **Services and data tier** | Versioned `/v1` API; answer cache in Redis, retired by each new load (a hit takes 3 ms vs 2.2 s for a miss); safe retries with `Idempotency-Key`; SQL generation as a gRPC service; a CI check that blocks risky migrations | FastAPI, Redis, gRPC + protobuf, GitHub Actions |
 
 <table>
@@ -758,6 +759,91 @@ Locally and in tests, everything runs in one process: with `REDIS_URL` and
 `SQLGEN_ADDR` unset, the cache uses memory and SQL generation is a function
 call. What went wrong: [docs/m2-what-broke.md](docs/m2-what-broke.md).
 
+## Production operations
+
+Milestone 3 asks what happens when parts of the chatbot fail, and makes the
+answer "it degrades, it doesn't fall over". The stack runs on Kubernetes (kind,
+in the Codespace) with 2 chatbot and 2 sqlgen replicas.
+
+- **GitOps.** Argo CD watches `deploy/k8s` (Kustomize) on GitHub and applies
+  every pushed change. The fixes in this milestone reached the cluster that
+  way, without `kubectl apply`.
+- **Load events.** After a load is marked successful, the pipeline publishes
+  `load_completed` to Redpanda. Every chatbot replica listens and retires its
+  cached answers at once: the next question got a fresh answer 0.8 s after the
+  event. The 60 s version check stays as the fallback.
+- **Degrade, don't fail.**
+  - Database down: cached answers keep working, and new questions get a clear
+    503 within about 3 s.
+  - Model or database down: a question asked before gets its last answer,
+    marked `stale` with its date, instead of an error.
+  - sqlgen pod gone: calls are retried on a live pod.
+- **SLOs.** 99.5% of chat requests succeed, and 95% finish within 8 s, over 28
+  days. Alerts fire on fast and slow error-budget burn (multi-window, from the
+  Google SRE workbook), and when dependencies go down. The rules are
+  unit-tested with promtool in CI.
+- **Chaos tests** (`chaos/run.py`). Traffic runs inside the cluster through the
+  chatbot Service while an experiment breaks one thing at a time. An experiment
+  passes only with zero 500s or dropped connections, and only 200s once the
+  dependency is back.
+
+```mermaid
+flowchart LR
+  gh[(GitHub<br/>deploy/k8s)] -->|watches| argo[Argo CD]
+  argo -->|syncs| k8s
+  subgraph k8s [kind cluster: namespace retail]
+    chatbot[chatbot x2] -->|gRPC| sqlgen[sqlgen x2]
+    chatbot --> pg[(Postgres copy)]
+    chatbot --> redis[(Redis)]
+    rp[[Redpanda]] -->|load_completed| chatbot
+    prom[Prometheus + SLO rules] -->|scrapes pods| chatbot
+    prom --> sqlgen
+    graf[Grafana] --> prom
+  end
+  dag[Airflow DAG / etl.run] -->|load_completed| rp
+```
+
+Decisions and trade-offs: [ADR 0003](docs/adr/0003-production-operations.md).
+
+<img src="pics/argocd_app_synced.jpg" alt="Argo CD UI for the retail-chatbot application: Healthy and Synced to the course/p3-operations branch, auto sync enabled, 25 resources synced and 44 healthy, with the resource tree of ConfigMaps, Services and endpoints" width="900">
+
+*Argo CD: the app is Synced and Healthy at the branch's latest commit, with
+auto sync on. Every change in this milestone reached the cluster through git.*
+
+<img src="pics/chaos_results.jpg" alt="Chaos test results table: six experiments (postgres killed, one sqlgen killed, all sqlgen killed, new load event, LLM errors 50%, redis killed), each with counts of fresh, cached, stale and 503 responses, zero worse outcomes, recovery between 0.8 and 41 seconds, all 200s afterwards, and PASS for all six" width="900">
+
+*Six failures injected under steady traffic, all passed: zero 500s or dropped
+connections. During the model outage, 41 users got the previous answer
+(stale) instead of an error.*
+
+<img src="pics/chaos_kubectl_pods.jpg" alt="kubectl get pods two seconds after the Postgres pod was deleted: the new postgres pod is 0/1 Running and 3 seconds old, while both chatbot pods, both sqlgen pods, Redis, Redpanda, Prometheus, Grafana and the chaos-traffic pod are 1/1 Running" width="760">
+
+*Two seconds into the Postgres kill: its replacement isn't ready yet (`0/1`),
+and both chatbots keep serving. Postgres was back in 3.6 s; three uncached
+questions got a clear 503 meanwhile.*
+
+<img src="pics/slo_error_budget.jpg" alt="Grafana SLO dashboard across the chaos run: availability error budget at minus 375 percent, latency error budget at 98.2 percent, availability 97.6 percent over 5 minutes, burn rate rising to 6, and responses split into fresh, cached, stale fallback and 5xx, with sqlgen instances dropping to zero once" width="900">
+
+*The SLO dashboard across the chaos run. Prometheus was minutes old, so the
+run alone is the whole 28-day window: the availability budget reads −375%. In
+production, the burn-rate alerts are what you'd watch. Stale fallbacks (blue)
+replace errors while the model is failing.*
+
+### Run it (in a 4-core Codespace)
+
+```bash
+bash deploy/kind/up.sh                 # kind + image + Argo CD + the app (~5 min); syncs the current branch
+bash deploy/kind/forward.sh            # chatbot :8000, Argo CD :8080, Grafana :3000, Prometheus :9090
+.venv/bin/python -m chaos.run          # the six experiments (~6 min); exits non-zero on any failure
+.venv/bin/python -m scripts.screenshots --milestone 3
+kind delete cluster --name retail      # when done
+```
+
+The cluster needs about 3 GB of RAM, more than a 2-core Codespace leaves
+comfortably, so this milestone used a 4-core one. What went wrong along the way
+(13 items, including the experiment Argo CD undid and the alert that could never
+fire): [docs/m3-what-broke.md](docs/m3-what-broke.md).
+
 ## Dummy data
 
 3 clients (Aurora Apparel, Bramble Footwear, Cobalt Outdoor) × 3 retailers.
@@ -843,13 +929,15 @@ To run one pipeline from the CLI without Airflow (same steps as its DAG):
 ## Tests
 
 ```bash
-.venv/bin/pytest -q tests                  # 170 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
+.venv/bin/pytest -q tests                  # 198 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, operations (load_completed publish/consume, DB-outage classification, stale fallback, gRPC retries and reconnect settings), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
 cd airflow && ../.venv/bin/pytest -q tests # 15 DAG tests: one DAG per pipeline, subflow shape, reconcile gates the merge, every Redshift writer pooled, priority order, failure path (FAILED, then triage, then email; none can raise)
 ```
 
 CI (`.github/workflows/ci.yml`) runs both suites, checks the gRPC stubs match
-`sqlgen.proto`, runs the migration-safety check, and runs `terraform fmt` and
-`terraform validate` on every push to `dev`/`main` and on every PR.
+`sqlgen.proto`, runs the migration-safety check, unit-tests the SLO alert rules
+with promtool, renders the Kubernetes manifests and validates them against the
+Kubernetes 1.31 schemas, and runs `terraform fmt` and `terraform validate`, on
+every push to `dev`/`main` and on every PR.
 
 ## Verified on live AWS
 
@@ -899,7 +987,10 @@ The observability stack and load tests cost nothing on AWS: they run in a
 2-core GitHub Codespace against the fake LLM and a Postgres copy, using the
 free monthly Codespaces hours. Milestone 2's Redis and gRPC service run there
 too, and its answer cache lowers the real cost: a repeated question makes no
-model call and no Redshift query. The one AWS step, exporting the `chat.*` views
+model call and no Redshift query. Milestone 3's Kubernetes cluster, Argo CD and
+Redpanda need a 4-core Codespace, which uses the free hours twice as fast, and
+only while it runs. Delete the cluster when done. Nothing in it touches AWS.
+The one AWS step, exporting the `chat.*` views
 (about 2,000 rows), is a single short Redshift session, about $0.05.
 
 ## Layout
@@ -921,7 +1012,10 @@ tests/, airflow/tests/         unit + DAG integrity tests
 .devcontainer/                 Codespace: Python 3.11, docker-in-docker, sshd, gh, Terraform, AWS CLI, Claude Code
 docker-compose.yml             local stack, by profile: app (chatbot, sqlgen, Postgres, Redis), obs (OTel, Jaeger, Prometheus, Grafana), load (k6)
 docker/                        chatbot image + Postgres seed (chat.* views, read-only chat_reader)
-observability/                 OTel Collector, Prometheus and Grafana config; golden-signals dashboard JSON
+observability/                 OTel Collector, Prometheus and Grafana config; golden-signals and SLO dashboards; rules/ (SLOs, alerts, promtool tests)
+deploy/k8s/                    Kubernetes manifests (Kustomize), synced by Argo CD
+deploy/argocd/, deploy/kind/   Argo CD Application and settings; kind cluster + up.sh / forward.sh
+chaos/                         chaos tests: run.py (experiments) and traffic.py (in-cluster traffic)
 loadtest/chat.js               k6 load test (1x / 10x; CACHE=on for cache hits and idempotent retries)
 scripts/                       export_chat_views.py (Redshift -> Postgres seed), screenshots.py (README images), idempotency_demo.py, check_migrations.py (CI)
 docs/adr/, docs/m*-what-broke.md   decisions and lessons per milestone

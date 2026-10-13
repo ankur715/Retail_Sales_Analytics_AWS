@@ -1,6 +1,7 @@
 """How the chatbot gets SQL written: over gRPC to the sqlgen service when SQLGEN_ADDR is
 set (the compose stack), otherwise in-process (tests, a laptop uvicorn). Same signature
 and result as chatbot.llm.write_sql either way."""
+import json
 import threading
 
 import grpc
@@ -16,6 +17,24 @@ from sqlgen import sqlgen_pb2, sqlgen_pb2_grpc
 KINDS = {grpc.StatusCode.UNAVAILABLE: "busy", grpc.StatusCode.DEADLINE_EXCEEDED: "busy",
          grpc.StatusCode.RESOURCE_EXHAUSTED: "quota", grpc.StatusCode.FAILED_PRECONDITION: "config",
          grpc.StatusCode.PERMISSION_DENIED: "declined"}
+# Retry UNAVAILABLE up to 3 attempts (gRPC service config): a pod that just died, or a
+# transient busy model, gets another try -- through the Service, so on a live pod -- inside the
+# same deadline. In Kubernetes the address is the sqlgen ClusterIP Service: kube-proxy routes
+# around dead pods within seconds. (Client-side round_robin over a headless Service balanced
+# better per call, but failed over only as fast as DNS caches expire; see deploy/k8s/sqlgen.yaml.)
+SERVICE_CONFIG = json.dumps({
+    "methodConfig": [{"name": [{"service": "retail.sqlgen.v1.SqlGenerator"}],
+                      "retryPolicy": {"maxAttempts": 3, "initialBackoff": "0.1s", "maxBackoff": "1s",
+                                      "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]}}],
+})
+# Reconnect fast after the connection drops (its pod died, or the server aged it out):
+#  - min_reconnect_backoff is also the connect TIMEOUT, 20 s by default. Right after a pod dies,
+#    a connect can go to its vanished IP and hang silently for all 20 s, failing every call
+#    meanwhile -- the chaos test measured exactly that. 1 s is plenty inside a cluster.
+#  - the backoff between attempts would otherwise grow to 2 min.
+CHANNEL_OPTIONS = [("grpc.service_config", SERVICE_CONFIG), ("grpc.enable_retries", 1),
+                   ("grpc.min_reconnect_backoff_ms", 1000),
+                   ("grpc.initial_reconnect_backoff_ms", 100), ("grpc.max_reconnect_backoff_ms", 1000)]
 _stub = None
 _lock = threading.Lock()
 
@@ -25,7 +44,8 @@ def stub() -> sqlgen_pb2_grpc.SqlGeneratorStub:
     global _stub
     with _lock:
         if _stub is None:
-            _stub = sqlgen_pb2_grpc.SqlGeneratorStub(grpc.insecure_channel(config.SQLGEN_ADDR))
+            channel = grpc.insecure_channel(config.SQLGEN_ADDR, options=CHANNEL_OPTIONS)
+            _stub = sqlgen_pb2_grpc.SqlGeneratorStub(channel)
         return _stub
 
 

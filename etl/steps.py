@@ -393,6 +393,9 @@ def archive(ctx: LoadContext) -> list[str]:
 def finish(ctx: LoadContext) -> None:
     redshift.run([("""UPDATE etl.load_audit SET status = 'SUCCESS', finished_at = GETDATE()
                       WHERE load_id = %(load_id)s;""", ctx.pair)])
+    # After the commit, so a listener that re-reads the data sees this load (never raises)
+    from etl import events
+    events.publish_load_completed(ctx)
 
 
 def fail(load_id: str, error: str, attempts: int = 5) -> None:

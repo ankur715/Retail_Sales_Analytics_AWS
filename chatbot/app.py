@@ -11,6 +11,7 @@ tables or Airflow -- the DAGs only keep the data behind the views fresh.
       4. run        as the read-only chat_reader user (30s timeout)
          -> on a validation or SQL error, one repair round (back to 2 with the error)
       5. summarize  the LLM answers from the returned rows only
+      fallback      model or database down -> the last answer to this question (stale: true), else 503
 
     POST /api/chat, GET /api/health: the pre-/v1 routes, kept for existing clients
     (deprecated; same behaviour, plus Deprecation and Link headers pointing at /v1).
@@ -18,6 +19,7 @@ tables or Airflow -- the DAGs only keep the data behind the views fresh.
 Run:  .venv/bin/uvicorn chatbot.app:app --port 8000   ->  http://localhost:8000  (API docs: /docs)
 """
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response
@@ -25,11 +27,18 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from chatbot import cache, catalog, db, guard, idempotency, llm, telemetry
+from chatbot import cache, catalog, db, events, guard, idempotency, llm, telemetry
 from etl import config
 from sqlgen import client as sqlgen
 
-app = FastAPI(title="Retail sales analytics chatbot", version="2.0",
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    events.start()   # load_completed listener, only when EVENTS_BOOTSTRAP is set
+    yield
+    events.stop()
+
+
+app = FastAPI(title="Retail sales analytics chatbot", version="2.0", lifespan=lifespan,
               description="Ask weekly retail sales and inventory questions in plain English. "
                           "Use the **/v1** routes; `/api/*` is kept for existing clients.")
 telemetry.setup(app)
@@ -54,6 +63,7 @@ class ChatResponse(BaseModel):
     row_count: int = 0
     data_as_of: str | None = None
     cached: bool = False
+    stale: bool = False     # the live path failed; this is the last answer we had (see data_as_of)
     error: str | None = None
 
 
@@ -62,6 +72,7 @@ MESSAGES = {
     "quota": "The language model's daily quota is used up -- try again tomorrow.",
     "config": "The language model isn't configured correctly on the server.",
     "declined": "The language model declined to answer that question.",
+    "database": "The database is unavailable right now -- please try again shortly.",
 }
 
 
@@ -70,6 +81,11 @@ def llm_unavailable(request: Request, exc: llm.LLMUnavailable):
     # A clear, retryable answer instead of a 500; `reason` carries the detail for the operator
     return JSONResponse(status_code=503, content={"detail": MESSAGES.get(exc.kind, MESSAGES["busy"]),
                                                   "reason": str(exc)})
+
+
+@app.exception_handler(db.DatabaseUnavailable)
+def database_unavailable(request: Request, exc: db.DatabaseUnavailable):
+    return JSONResponse(status_code=503, content={"detail": MESSAGES["database"], "reason": str(exc)})
 
 
 @app.get("/", include_in_schema=False)
@@ -111,7 +127,10 @@ def chat(req: ChatRequest, idempotency_key: str | None = IDEMPOTENCY_KEY):
             idempotency.release(idempotency_key)   # failed: let the retry run for real
         raise
     if claim:
-        idempotency.finish(idempotency_key, fp, 200, jsonable_encoder(result))
+        if result.stale:   # a fallback isn't the answer to this request: let a retry try the live path
+            idempotency.release(idempotency_key)
+        else:
+            idempotency.finish(idempotency_key, fp, 200, jsonable_encoder(result))
     return result
 
 
@@ -139,8 +158,17 @@ def chat_legacy(req: ChatRequest, response: Response, idempotency_key: str | Non
 def answer(req: ChatRequest) -> ChatResponse:
     started, outcome = time.perf_counter(), "miss"
     try:
-        result = _answer(req)
-        outcome = "hit" if result.cached else "miss"
+        try:
+            result = _answer(req)
+        except (llm.LLMUnavailable, db.DatabaseUnavailable):
+            # Stale-if-error: the last answer to this question (any data version) beats a 503.
+            # The response says stale, and data_as_of says how old the data is.
+            last = cache.last(req.message.strip())
+            if not last:
+                raise
+            telemetry.CACHE.labels("stale").inc()
+            result = ChatResponse(**{**last, "cached": True, "stale": True})
+        outcome = "stale" if result.stale else "hit" if result.cached else "miss"
         return result
     finally:
         telemetry.ANSWER_SECONDS.labels(outcome).observe(time.perf_counter() - started)
@@ -180,7 +208,9 @@ def _answer(req: ChatRequest) -> ChatResponse:
             result = db.query(sql)
             error = None
             break
-        except Exception as e:   # UnsafeSQL or a database error: give the model the exact message once
+        except db.DatabaseUnavailable:
+            raise                # not the query's fault: no repair round, fall back or 503
+        except Exception as e:   # UnsafeSQL or a query error: give the model the exact message once
             error = str(e).strip().splitlines()[0][:300]
             if attempt < MAX_REPAIRS:
                 plan = sqlgen.write_sql(question, route.views, details, previous_error=error, previous_sql=plan.sql)

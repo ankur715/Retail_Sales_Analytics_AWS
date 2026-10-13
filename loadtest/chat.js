@@ -8,7 +8,8 @@
 // 1x = 2 virtual users asking back to back (a couple of analysts); 10x = 20.
 // CACHE=off (default): each question gets a unique suffix so it misses the answer cache -- the full
 //   route -> SQL -> query -> summarize path, the worst case (milestone 1's numbers).
-// CACHE=on: questions repeat from a pool of 40, so after warm-up most hit the Redis cache. Every
+// CACHE=on: 70% of questions repeat from a pool of 40, so after warm-up they hit the Redis cache;
+//   the other 30% are unique and miss, so both latencies stay visible side by side. Every
 //   request carries an Idempotency-Key, and 10% are sent twice, like a client retrying after a
 //   timeout; the retry must come back as a replay (Idempotent-Replayed: true).
 import http from "k6/http";
@@ -21,6 +22,7 @@ const DURATION = __ENV.DURATION || "3m";
 const BASE = __ENV.BASE_URL || "http://chatbot:8000";
 const CACHE = (__ENV.CACHE || "off") === "on";
 const POOL = 8;            // suffixes per question in CACHE=on: 5 x 8 = 40 distinct questions
+const REPEAT_SHARE = 0.7;
 const RETRY_SHARE = 0.1;
 
 const QUESTIONS = [
@@ -52,7 +54,8 @@ function ask(q, key, name) {
 
 export default function () {
   const base = QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)];
-  const q = CACHE ? `${base} (#${Math.floor(Math.random() * POOL)})` : `${base} (${__VU}-${__ITER})`;
+  const repeat = CACHE && Math.random() < REPEAT_SHARE;
+  const q = repeat ? `${base} (#${Math.floor(Math.random() * POOL)})` : `${base} (${__VU}-${__ITER})`;
   const key = CACHE ? `k6-${__VU}-${__ITER}-${Date.now()}` : null;
   const res = ask(q, key, "chat");
   chatLatency.add(res.timings.duration);

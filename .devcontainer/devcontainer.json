@@ -1,0 +1,27 @@
+{
+  "name": "retail-sales-analytics",
+  "build": { "dockerfile": "Dockerfile" },
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {},
+    "ghcr.io/devcontainers/features/sshd:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/terraform:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [8000, 3000, 16686, 9090],
+  "portsAttributes": {
+    "8000": { "label": "chatbot", "onAutoForward": "silent" },
+    "3000": { "label": "grafana", "onAutoForward": "silent" },
+    "16686": { "label": "jaeger", "onAutoForward": "silent" },
+    "9090": { "label": "prometheus", "onAutoForward": "silent" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-azuretools.vscode-docker"]
+    }
+  }
+}

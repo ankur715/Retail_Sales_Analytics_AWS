@@ -1,0 +1,123 @@
+week_ending,weeks_ago,brand,retailer,category,sales_usd,inventory_units,products_reported,products_out_of_stock,prev_week_sales_usd,wow_change_usd,wow_change_pct
+2026-07-11,15,Bramble Footwear,Northgate Department Stores,Footwear,33990.14,2154,20,0,,,
+2026-07-11,15,Aurora Apparel,Summit Outfitters,Apparel,70700.56,4047,20,0,,,
+2026-07-11,15,Cobalt Outdoor,Harbor Mart,Outdoor,151444.4,7088,5,0,,,
+2026-07-11,15,Cobalt Outdoor,Summit Outfitters,Outdoor,103157.14,4108,20,0,,,
+2026-07-11,15,Aurora Apparel,Harbor Mart,Apparel,100779.12,5404,5,0,,,
+2026-07-11,15,Bramble Footwear,Summit Outfitters,Footwear,73401.63,3770,20,0,,,
+2026-07-11,15,Aurora Apparel,Northgate Department Stores,Apparel,40000.76,1892,20,0,,,
+2026-07-11,15,Bramble Footwear,Harbor Mart,Footwear,93917.8,5564,5,0,,,
+2026-07-11,15,Cobalt Outdoor,Northgate Department Stores,Outdoor,57476.57,2512,20,0,,,
+2026-07-18,14,Bramble Footwear,Summit Outfitters,Footwear,70929.64,3819,20,0,73401.63,-2471.99,-3.4
+2026-07-18,14,Aurora Apparel,Northgate Department Stores,Apparel,41801.22,2037,20,0,40000.76,1800.46,4.5
+2026-07-18,14,Aurora Apparel,Summit Outfitters,Apparel,75988.5,3904,20,0,70700.56,5287.94,7.5
+2026-07-18,14,Bramble Footwear,Harbor Mart,Footwear,82004.72,4596,5,0,93917.8,-11913.08,-12.7
+2026-07-18,14,Cobalt Outdoor,Summit Outfitters,Outdoor,118942.49,3823,20,0,103157.14,15785.35,15.3
+2026-07-18,14,Cobalt Outdoor,Northgate Department Stores,Outdoor,60944.69,2116,20,0,57476.57,3468.12,6.0
+2026-07-18,14,Bramble Footwear,Northgate Department Stores,Footwear,38461.78,2005,20,0,33990.14,4471.64,13.2
+2026-07-18,14,Aurora Apparel,Harbor Mart,Apparel,119775.76,6012,5,0,100779.12,18996.64,18.8
+2026-07-18,14,Cobalt Outdoor,Harbor Mart,Outdoor,183258.12,6640,5,0,151444.4,31813.72,21.0
+2026-07-25,13,Aurora Apparel,Harbor Mart,Apparel,123799.68,4952,5,0,119775.76,4023.92,3.4
+2026-07-25,13,Bramble Footwear,Northgate Department Stores,Footwear,30406.8,2048,20,0,38461.78,-8054.98,-20.9
+2026-07-25,13,Aurora Apparel,Summit Outfitters,Apparel,74491.46,3937,20,0,75988.5,-1497.04,-2.0
+2026-07-25,13,Cobalt Outdoor,Harbor Mart,Outdoor,124320.64,5028,5,0,183258.12,-58937.48,-32.2
+2026-07-25,13,Cobalt Outdoor,Summit Outfitters,Outdoor,121534.68,3610,20,0,118942.49,2592.19,2.2
+2026-07-25,13,Bramble Footwear,Summit Outfitters,Footwear,65833.77,4369,20,0,70929.64,-5095.87,-7.2
+2026-07-25,13,Aurora Apparel,Northgate Department Stores,Apparel,37985.2,1985,20,0,41801.22,-3816.02,-9.1
+2026-07-25,13,Bramble Footwear,Harbor Mart,Footwear,105138.96,6832,5,0,82004.72,23134.24,28.2
+2026-07-25,13,Cobalt Outdoor,Northgate Department Stores,Outdoor,51990.92,1942,20,0,60944.69,-8953.77,-14.7
+2026-08-01,12,Bramble Footwear,Summit Outfitters,Footwear,54768.09,4104,20,0,65833.77,-11065.68,-16.8
+2026-08-01,12,Aurora Apparel,Northgate Department Stores,Apparel,40738.76,2421,20,0,37985.2,2753.56,7.2
+2026-08-01,12,Bramble Footwear,Northgate Department Stores,Footwear,31305.06,2259,20,0,30406.8,898.26,3.0
+2026-08-01,12,Bramble Footwear,Harbor Mart,Footwear,91256.68,7644,5,0,105138.96,-13882.28,-13.2
+2026-08-01,12,Cobalt Outdoor,Harbor Mart,Outdoor,180558.96,6096,5,0,124320.64,56238.32,45.2
+2026-08-01,12,Cobalt Outdoor,Northgate Department Stores,Outdoor,63430.03,2110,20,0,51990.92,11439.11,22.0
+2026-08-01,12,Aurora Apparel,Harbor Mart,Apparel,82062.08,5496,5,0,123799.68,-41737.6,-33.7
+2026-08-01,12,Aurora Apparel,Summit Outfitters,Apparel,80659.54,4089,20,0,74491.46,6168.08,8.3
+2026-08-01,12,Cobalt Outdoor,Summit Outfitters,Outdoor,116155.65,3934,20,0,121534.68,-5379.03,-4.4
+2026-08-08,11,Bramble Footwear,Northgate Department Stores,Footwear,36950.87,1907,20,0,31305.06,5645.81,18.0
+2026-08-08,11,Aurora Apparel,Summit Outfitters,Apparel,85088.46,3989,20,0,80659.54,4428.92,5.5
+2026-08-08,11,Cobalt Outdoor,Harbor Mart,Outdoor,160307.52,6916,5,0,180558.96,-20251.44,-11.2
+2026-08-08,11,Cobalt Outdoor,Summit Outfitters,Outdoor,124560.08,4061,20,0,116155.65,8404.43,7.2
+2026-08-08,11,Aurora Apparel,Harbor Mart,Apparel,131336.88,5356,5,0,82062.08,49274.8,60.0
+2026-08-08,11,Bramble Footwear,Summit Outfitters,Footwear,53008.97,4471,20,0,54768.09,-1759.12,-3.2
+2026-08-08,11,Aurora Apparel,Northgate Department Stores,Apparel,35192.06,2019,20,0,40738.76,-5546.7,-13.6
+2026-08-08,11,Bramble Footwear,Harbor Mart,Footwear,70060.8,6088,5,0,91256.68,-21195.88,-23.2
+2026-08-08,11,Cobalt Outdoor,Northgate Department Stores,Outdoor,67245.15,1915,20,0,63430.03,3815.12,6.0
+2026-08-15,10,Bramble Footwear,Summit Outfitters,Footwear,68811.98,3886,20,0,53008.97,15803.01,29.8
+2026-08-15,10,Aurora Apparel,Northgate Department Stores,Apparel,38223.76,2518,20,0,35192.06,3031.7,8.6
+2026-08-15,10,Aurora Apparel,Summit Outfitters,Apparel,88226.74,3869,20,0,85088.46,3138.28,3.7
+2026-08-15,10,Bramble Footwear,Harbor Mart,Footwear,104232.64,7072,5,0,70060.8,34171.84,48.8
+2026-08-15,10,Cobalt Outdoor,Summit Outfitters,Outdoor,116826.06,4704,20,0,124560.08,-7734.02,-6.2
+2026-08-15,10,Cobalt Outdoor,Northgate Department Stores,Outdoor,48862.29,1598,20,0,67245.15,-18382.86,-27.3
+2026-08-15,10,Bramble Footwear,Northgate Department Stores,Footwear,31304.16,2413,20,0,36950.87,-5646.71,-15.3
+2026-08-15,10,Aurora Apparel,Harbor Mart,Apparel,111846.72,4628,5,0,131336.88,-19490.16,-14.8
+2026-08-15,10,Cobalt Outdoor,Harbor Mart,Outdoor,176501.32,6756,5,0,160307.52,16193.8,10.1
+2026-08-22,9,Aurora Apparel,Harbor Mart,Apparel,103172.96,8492,5,0,111846.72,-8673.76,-7.8
+2026-08-22,9,Bramble Footwear,Northgate Department Stores,Footwear,36703.91,2010,20,0,31304.16,5399.75,17.2
+2026-08-22,9,Aurora Apparel,Summit Outfitters,Apparel,76178.46,4620,20,0,88226.74,-12048.28,-13.7
+2026-08-22,9,Cobalt Outdoor,Harbor Mart,Outdoor,119873.08,6008,5,0,176501.32,-56628.24,-32.1
+2026-08-22,9,Cobalt Outdoor,Summit Outfitters,Outdoor,104016.77,4346,20,0,116826.06,-12809.29,-11.0
+2026-08-22,9,Bramble Footwear,Summit Outfitters,Footwear,68231.92,4547,20,0,68811.98,-580.06,-0.8
+2026-08-22,9,Aurora Apparel,Northgate Department Stores,Apparel,35720.36,2283,20,0,38223.76,-2503.4,-6.5
+2026-08-22,9,Bramble Footwear,Harbor Mart,Footwear,93883.88,7908,5,0,104232.64,-10348.76,-9.9
+2026-08-22,9,Cobalt Outdoor,Northgate Department Stores,Outdoor,56488.79,1984,20,0,48862.29,7626.5,15.6
+2026-08-29,8,Bramble Footwear,Summit Outfitters,Footwear,64975.97,4087,20,0,68231.92,-3255.95,-4.8
+2026-08-29,8,Aurora Apparel,Northgate Department Stores,Apparel,34849.28,2011,20,0,35720.36,-871.08,-2.4
+2026-08-29,8,Bramble Footwear,Northgate Department Stores,Footwear,26866.77,2098,20,0,36703.91,-9837.14,-26.8
+2026-08-29,8,Bramble Footwear,Harbor Mart,Footwear,74151.0,6784,5,0,93883.88,-19732.88,-21.0
+2026-08-29,8,Cobalt Outdoor,Harbor Mart,Outdoor,154594.08,6744,5,0,119873.08,34721.0,29.0
+2026-08-29,8,Cobalt Outdoor,Northgate Department Stores,Outdoor,61956.63,2001,20,0,56488.79,5467.84,9.7
+2026-08-29,8,Aurora Apparel,Harbor Mart,Apparel,89184.24,6748,5,0,103172.96,-13988.72,-13.6
+2026-08-29,8,Aurora Apparel,Summit Outfitters,Apparel,71387.46,4574,20,0,76178.46,-4791.0,-6.3
+2026-08-29,8,Cobalt Outdoor,Summit Outfitters,Outdoor,117646.39,4440,20,0,104016.77,13629.62,13.1
+2026-09-05,7,Bramble Footwear,Northgate Department Stores,Footwear,37398.97,2317,20,0,26866.77,10532.2,39.2
+2026-09-05,7,Aurora Apparel,Summit Outfitters,Apparel,66744.72,4256,20,0,71387.46,-4642.74,-6.5
+2026-09-05,7,Cobalt Outdoor,Harbor Mart,Outdoor,164459.04,5860,5,0,154594.08,9864.96,6.4
+2026-09-05,7,Cobalt Outdoor,Summit Outfitters,Outdoor,94499.79,3331,20,0,117646.39,-23146.6,-19.7
+2026-09-05,7,Aurora Apparel,Harbor Mart,Apparel,138977.04,5432,5,0,89184.24,49792.8,55.8
+2026-09-05,7,Bramble Footwear,Summit Outfitters,Footwear,52310.65,3581,20,0,64975.97,-12665.32,-19.5
+2026-09-05,7,Aurora Apparel,Northgate Department Stores,Apparel,37101.08,2113,20,0,34849.28,2251.8,6.5
+2026-09-05,7,Bramble Footwear,Harbor Mart,Footwear,107494.0,7068,5,0,74151.0,33343.0,45.0
+2026-09-05,7,Cobalt Outdoor,Northgate Department Stores,Outdoor,55953.29,1756,20,0,61956.63,-6003.34,-9.7
+2026-09-12,6,Bramble Footwear,Summit Outfitters,Footwear,64048.96,4306,20,0,52310.65,11738.31,22.4
+2026-09-12,6,Aurora Apparel,Northgate Department Stores,Apparel,42726.72,1916,20,0,37101.08,5625.64,15.2
+2026-09-12,6,Aurora Apparel,Summit Outfitters,Apparel,84294.2,5335,20,0,66744.72,17549.48,26.3
+2026-09-12,6,Bramble Footwear,Harbor Mart,Footwear,98920.24,5496,5,0,107494.0,-8573.76,-8.0
+2026-09-12,6,Cobalt Outdoor,Summit Outfitters,Outdoor,104047.92,3730,20,0,94499.79,9548.13,10.1
+2026-09-12,6,Cobalt Outdoor,Northgate Department Stores,Outdoor,64836.65,2189,20,0,55953.29,8883.36,15.9
+2026-09-12,6,Bramble Footwear,Northgate Department Stores,Footwear,44495.48,2375,20,0,37398.97,7096.51,19.0
+2026-09-12,6,Aurora Apparel,Harbor Mart,Apparel,119623.12,5412,5,0,138977.04,-19353.92,-13.9
+2026-09-12,6,Cobalt Outdoor,Harbor Mart,Outdoor,146853.72,6428,5,0,164459.04,-17605.32,-10.7
+2026-09-19,5,Aurora Apparel,Harbor Mart,Apparel,139208.32,5636,5,0,119623.12,19585.2,16.4
+2026-09-19,5,Bramble Footwear,Northgate Department Stores,Footwear,31540.54,2299,20,0,44495.48,-12954.94,-29.1
+2026-09-19,5,Aurora Apparel,Summit Outfitters,Apparel,81572.8,4602,20,0,84294.2,-2721.4,-3.2
+2026-09-19,5,Cobalt Outdoor,Harbor Mart,Outdoor,172150.88,7240,5,0,146853.72,25297.16,17.2
+2026-09-19,5,Cobalt Outdoor,Summit Outfitters,Outdoor,106653.2,3999,20,0,104047.92,2605.28,2.5
+2026-09-19,5,Bramble Footwear,Summit Outfitters,Footwear,54024.67,3987,20,0,64048.96,-10024.29,-15.7
+2026-09-19,5,Aurora Apparel,Northgate Department Stores,Apparel,40245.56,2095,20,0,42726.72,-2481.16,-5.8
+2026-09-19,5,Bramble Footwear,Harbor Mart,Footwear,86586.48,6236,5,0,98920.24,-12333.76,-12.5
+2026-09-19,5,Cobalt Outdoor,Northgate Department Stores,Outdoor,57470.96,2338,20,0,64836.65,-7365.69,-11.4
+2026-09-26,4,Bramble Footwear,Summit Outfitters,Footwear,52305.69,3829,20,0,54024.67,-1718.98,-3.2
+2026-09-26,4,Aurora Apparel,Northgate Department Stores,Apparel,32927.74,2273,20,0,40245.56,-7317.82,-18.2
+2026-09-26,4,Bramble Footwear,Northgate Department Stores,Footwear,32849.21,2101,20,0,31540.54,1308.67,4.1
+2026-09-26,4,Bramble Footwear,Harbor Mart,Footwear,89169.44,6200,5,0,86586.48,2582.96,3.0
+2026-09-26,4,Cobalt Outdoor,Harbor Mart,Outdoor,182887.68,6268,5,0,172150.88,10736.8,6.2
+2026-09-26,4,Cobalt Outdoor,Northgate Department Stores,Outdoor,50651.7,2277,20,0,57470.96,-6819.26,-11.9
+2026-09-26,4,Aurora Apparel,Harbor Mart,Apparel,132086.56,5628,5,0,139208.32,-7121.76,-5.1
+2026-09-26,4,Aurora Apparel,Summit Outfitters,Apparel,68436.68,3911,20,0,81572.8,-13136.12,-16.1
+2026-09-26,4,Cobalt Outdoor,Summit Outfitters,Outdoor,106234.12,3471,20,0,106653.2,-419.08,-0.4
+2026-10-03,3,Bramble Footwear,Northgate Department Stores,Footwear,27448.66,2173,20,0,32849.21,-5400.55,-16.4
+2026-10-03,3,Aurora Apparel,Summit Outfitters,Apparel,71837.62,4581,20,0,68436.68,3400.94,5.0
+2026-10-03,3,Cobalt Outdoor,Harbor Mart,Outdoor,125217.6,5264,5,0,182887.68,-57670.08,-31.5
+2026-10-03,3,Cobalt Outdoor,Summit Outfitters,Outdoor,130132.02,4340,20,0,106234.12,23897.9,22.5
+2026-10-03,3,Aurora Apparel,Harbor Mart,Apparel,94967.36,5780,5,0,132086.56,-37119.2,-28.1
+2026-10-03,3,Bramble Footwear,Summit Outfitters,Footwear,57367.19,4277,20,0,52305.69,5061.5,9.7
+2026-10-03,3,Aurora Apparel,Northgate Department Stores,Apparel,32594.14,2305,20,0,32927.74,-333.6,-1.0
+2026-10-03,3,Bramble Footwear,Harbor Mart,Footwear,86969.28,5832,5,0,89169.44,-2200.16,-2.5
+2026-10-03,3,Cobalt Outdoor,Northgate Department Stores,Outdoor,53343.58,2346,20,0,50651.7,2691.88,5.3
+2026-10-10,2,Bramble Footwear,Northgate Department Stores,Footwear,23353.54,2178,20,0,27448.66,-4095.12,-14.9
+2026-10-10,2,Aurora Apparel,Northgate Department Stores,Apparel,36782.98,2108,20,0,32594.14,4188.84,12.9
+2026-10-10,2,Aurora Apparel,Summit Outfitters,Apparel,70837.48,4490,20,0,71837.62,-1000.14,-1.4
+2026-10-17,1,Aurora Apparel,Northgate Department Stores,Apparel,28247.94,2298,20,0,36782.98,-8535.04,-23.2
+2026-10-24,0,Aurora Apparel,Northgate Department Stores,Apparel,31800.54,2342,20,0,28247.94,3552.6,12.6

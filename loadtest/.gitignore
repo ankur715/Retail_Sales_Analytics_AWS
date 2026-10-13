@@ -1,0 +1,6 @@
+results/*.json
+results/*.svg
+results/*.log
+results/start
+results/mid
+results/end

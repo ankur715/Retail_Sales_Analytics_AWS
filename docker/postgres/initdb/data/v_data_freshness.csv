@@ -1,0 +1,10 @@
+brand,retailer,first_week_loaded,latest_week_loaded,weeks_loaded,last_successful_load_at
+Aurora Apparel,Harbor Mart,2026-07-11,2026-10-03,13,2026-10-01T05:52:08
+Aurora Apparel,Summit Outfitters,2026-07-11,2026-10-10,14,2026-10-05T19:03:48
+Aurora Apparel,Northgate Department Stores,2026-07-11,2026-10-24,16,2026-10-08T17:57:47
+Bramble Footwear,Northgate Department Stores,2026-07-11,2026-10-10,14,2026-10-01T20:10:11
+Bramble Footwear,Harbor Mart,2026-07-11,2026-10-03,13,2026-10-01T05:51:33
+Bramble Footwear,Summit Outfitters,2026-07-11,2026-10-03,13,2026-10-01T20:10:55
+Cobalt Outdoor,Northgate Department Stores,2026-07-11,2026-10-03,13,2026-10-01T05:50:51
+Cobalt Outdoor,Harbor Mart,2026-07-11,2026-10-03,13,2026-10-01T05:51:57
+Cobalt Outdoor,Summit Outfitters,2026-07-11,2026-10-03,13,2026-10-01T05:51:11

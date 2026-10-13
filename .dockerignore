@@ -1,0 +1,10 @@
+# Never send secrets or bulky local state into an image build.
+.env
+.env.*
+.venv/
+.git/
+data/
+pics/
+airflow/
+infra/
+**/__pycache__/

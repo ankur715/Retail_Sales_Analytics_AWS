@@ -5,6 +5,7 @@ import time
 from datetime import date, datetime
 from decimal import Decimal
 
+from chatbot import telemetry
 from etl import config, redshift
 
 KNOWN_VALUES_TTL = 3600   # seconds; brand/retailer lists change only when a feed is onboarded
@@ -20,18 +21,21 @@ def _jsonable(v):
 
 
 def query(sql: str) -> dict:
-    conn = redshift.get_connection(user=config.CHAT_REDSHIFT_USER, password=config.CHAT_REDSHIFT_PASSWORD)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SET statement_timeout TO 30000;")   # also set on the user; belt and braces
-            started = time.monotonic()
-            cur.execute(sql)
-            columns = [d[0] for d in cur.description]
-            rows = [[_jsonable(v) for v in row] for row in cur.fetchall()]
-        return {"columns": columns, "rows": rows, "row_count": len(rows),
-                "elapsed_ms": int((time.monotonic() - started) * 1000)}
-    finally:
-        conn.close()
+    with telemetry.step("db.query", **{"db.system": "postgresql", "db.name": config.REDSHIFT_DB,
+                                       "db.statement": sql[:1000]}) as span:
+        conn = redshift.get_connection(user=config.CHAT_REDSHIFT_USER, password=config.CHAT_REDSHIFT_PASSWORD)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET statement_timeout TO 30000;")   # also set on the user; belt and braces
+                started = time.monotonic()
+                cur.execute(sql)
+                columns = [d[0] for d in cur.description]
+                rows = [[_jsonable(v) for v in row] for row in cur.fetchall()]
+            span.set_attribute("db.rows", len(rows))
+            return {"columns": columns, "rows": rows, "row_count": len(rows),
+                    "elapsed_ms": int((time.monotonic() - started) * 1000)}
+        finally:
+            conn.close()
 
 
 def known_values(columns_by_view: dict[str, list[str]]) -> dict[str, list]:

@@ -104,15 +104,15 @@ groups:
   - name: chatbot-dependencies
     rules:
       - alert: ChatbotDown
-        expr: absent(up{job="chatbot"} == 1)
+        expr: absent(up{job="chatbot"} == 1)   # absent() can't copy labels through `== 1`, so job is set below
         for: 1m
-        labels: {severity: page}
+        labels: {severity: page, job: chatbot}
         annotations:
           summary: "No healthy chatbot instance is being scraped"
       - alert: SqlgenDown
         expr: absent(up{job="sqlgen"} == 1)
         for: 1m
-        labels: {severity: page}
+        labels: {severity: page, job: sqlgen}
         annotations:
           summary: "No healthy sqlgen instance: every uncached question fails or falls back to a stale answer"
       - alert: ChatbotServingStale

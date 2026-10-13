@@ -181,9 +181,13 @@ def summarize(name: str, start: float, recovered: float, end: float) -> dict:
     first_fresh = next((r["t"] for r in window if r["t"] >= start and outcome(r) == "fresh"
                         and r["k"] == "pool"), None)
     ok = counts["worse"] == 0 and all(r["s"] == 200 for r in after)
+    reasons: dict[str, int] = {}
+    for r in window:
+        if r["s"] != 200:
+            reasons[r.get("d", str(r["s"]))] = reasons.get(r.get("d", str(r["s"])), 0) + 1
     return {"name": name, **counts, "requests": len(window), "recovery_s": round(recovered - start, 1),
             "first_fresh_pool_s": round(first_fresh - start, 2) if first_fresh else None,
-            "after_ok": f"{sum(r['s'] == 200 for r in after)}/{len(after)}", "pass": ok}
+            "after_ok": f"{sum(r['s'] == 200 for r in after)}/{len(after)}", "pass": ok, "errors": reasons}
 
 
 def render(rows: list[dict]) -> None:

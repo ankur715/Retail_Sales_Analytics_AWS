@@ -29,8 +29,9 @@ SERVICE = "sqlgen"
 CODES = {"busy": grpc.StatusCode.UNAVAILABLE, "quota": grpc.StatusCode.RESOURCE_EXHAUSTED,
          "config": grpc.StatusCode.FAILED_PRECONDITION, "declined": grpc.StatusCode.PERMISSION_DENIED}
 log = logging.getLogger(SERVICE)
-# Close each client connection after ~30 s (clients reconnect transparently): with client-side
-# round_robin over a headless Service, that's how clients notice pods added by a scale-up.
+# Close each client connection after ~30 s (clients reconnect transparently). Behind a ClusterIP
+# Service, a long-lived HTTP/2 connection would pin a client to one pod forever; reconnecting
+# lets kube-proxy spread clients across pods, including ones added by a scale-up.
 OPTIONS = [("grpc.max_connection_age_ms", 30_000), ("grpc.max_connection_age_grace_ms", 10_000)]
 STOP_GRACE_S = 15   # on SIGTERM, in-flight calls get this long to finish (pod terminationGracePeriodSeconds: 20)
 

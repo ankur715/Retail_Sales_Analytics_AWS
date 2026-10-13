@@ -17,23 +17,19 @@ from sqlgen import sqlgen_pb2, sqlgen_pb2_grpc
 KINDS = {grpc.StatusCode.UNAVAILABLE: "busy", grpc.StatusCode.DEADLINE_EXCEEDED: "busy",
          grpc.StatusCode.RESOURCE_EXHAUSTED: "quota", grpc.StatusCode.FAILED_PRECONDITION: "config",
          grpc.StatusCode.PERMISSION_DENIED: "declined"}
-# Client-side policy (gRPC service config):
-#  - round_robin: with a headless Kubernetes Service (dns:///sqlgen-headless:50051) the client
-#    sees every sqlgen pod and spreads calls over them. A plain ClusterIP would pin this
-#    process's single HTTP/2 connection -- and so all its calls -- to one pod.
-#  - retry UNAVAILABLE up to 3 attempts: a pod that just died, or a transient busy model, gets
-#    another try on another pod, inside the same deadline.
+# Retry UNAVAILABLE up to 3 attempts (gRPC service config): a pod that just died, or a
+# transient busy model, gets another try -- through the Service, so on a live pod -- inside the
+# same deadline. In Kubernetes the address is the sqlgen ClusterIP Service: kube-proxy routes
+# around dead pods within seconds. (Client-side round_robin over a headless Service balanced
+# better per call, but failed over only as fast as DNS caches expire; see deploy/k8s/sqlgen.yaml.)
 SERVICE_CONFIG = json.dumps({
-    "loadBalancingConfig": [{"round_robin": {}}],
     "methodConfig": [{"name": [{"service": "retail.sqlgen.v1.SqlGenerator"}],
                       "retryPolicy": {"maxAttempts": 3, "initialBackoff": "0.1s", "maxBackoff": "1s",
                                       "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]}}],
 })
-# When every pod dies at once (a crash, a bad deploy), the replacements come back on new IPs.
-# gRPC's defaults would keep dialing the dead ones: at most one DNS lookup per 30 s and
-# reconnect backoff growing to 2 min. Re-resolve within a second and cap the backoff at 1 s.
+# Reconnect fast after the connection drops (its pod died, or the server aged it out): gRPC's
+# default backoff grows to 2 min, during which every call would fail without trying.
 CHANNEL_OPTIONS = [("grpc.service_config", SERVICE_CONFIG), ("grpc.enable_retries", 1),
-                   ("grpc.dns_min_time_between_resolutions_ms", 1000),
                    ("grpc.initial_reconnect_backoff_ms", 100), ("grpc.max_reconnect_backoff_ms", 1000)]
 _stub = None
 _lock = threading.Lock()

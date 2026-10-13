@@ -19,14 +19,16 @@ lock = threading.Lock()
 
 
 def worker():
-    session = requests.Session()
+    # A new connection per request: Kubernetes balances per connection, so one kept-alive
+    # session per worker would pin all of a worker's traffic to one chatbot pod.
     while True:
         pool = random.random() < 0.7
         q = random.choice(POOL) if pool else f"Total sales by brand ({uuid.uuid4().hex[:8]})"
         started = time.time()
         line = {"t": started, "k": "pool" if pool else "unique"}
         try:
-            r = session.post(f"{BASE}/v1/chat", json={"message": q}, timeout=30)
+            r = requests.post(f"{BASE}/v1/chat", json={"message": q}, timeout=30,
+                              headers={"Connection": "close"})
             line["s"] = r.status_code
             body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             line.update(c=bool(body.get("cached")), st=bool(body.get("stale")))
@@ -34,7 +36,6 @@ def worker():
                 line["d"] = str(body.get("detail", r.text))[:60]
         except Exception as e:   # connection refused / reset / timeout: the worst outcome
             line.update(s=0, d=type(e).__name__)
-            session = requests.Session()
             time.sleep(0.2)
         line["ms"] = round((time.time() - started) * 1000)
         with lock:

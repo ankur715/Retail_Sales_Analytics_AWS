@@ -1,7 +1,12 @@
-# SQL generation (gRPC), two replicas. The chatbot reaches them through the HEADLESS service
-# with client-side round_robin (sqlgen/client.py): a normal ClusterIP would pin each chatbot's
-# HTTP/2 connection to one pod. The server ends connections after 30 s so clients re-resolve
-# DNS and pick up new pods (sqlgen/server.py).
+# SQL generation (gRPC), two replicas behind a normal ClusterIP Service.
+#
+# Tried first: a headless Service with client-side round_robin (per-call balancing). The chaos
+# test showed why not here: when every sqlgen pod is replaced, DNS (CoreDNS caches 30 s) keeps
+# returning the dead pods' IPs, so the chatbot failed for ~30-45 s after sqlgen was already
+# back. Through the ClusterIP, kube-proxy routes a reconnect to a live pod within a second or
+# two of the endpoints changing. The cost is per-connection balancing: each chatbot's HTTP/2
+# connection sticks to one pod until the server ends it after 30 s (sqlgen/server.py), and the
+# client reconnects, possibly to another pod. See ADR 0003.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,8 +41,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: sqlgen-headless
+  name: sqlgen
 spec:
-  clusterIP: None
   selector: { app: sqlgen }
   ports: [{ port: 50051, targetPort: grpc, name: grpc }]

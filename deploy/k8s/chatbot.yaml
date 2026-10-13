@@ -33,7 +33,7 @@ spec:
             - { name: CHAT_DB_CONNECT_TIMEOUT_S, value: "3" }   # a local copy, not a sleeping Redshift
             - { name: CHAT_DB_ATTEMPTS, value: "1" }
             - { name: REDIS_URL, value: "redis://redis:6379/0" }
-            - { name: SQLGEN_ADDR, value: "dns:///sqlgen-headless.retail.svc.cluster.local:50051" }
+            - { name: SQLGEN_ADDR, value: "sqlgen:50051" }   # ClusterIP: fast failover (see sqlgen.yaml)
             - { name: EVENTS_BOOTSTRAP, value: "redpanda:9092" }
           lifecycle:
             # Stay up 5 s after Kubernetes starts removing the pod from the Service, so requests

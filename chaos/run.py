@@ -16,7 +16,8 @@ For each: what users got (fresh / cached / stale fallback / 503 / anything worse
 long until the broken part was back. The bar: no 500s, no dropped connections, and only
 200s once the dependency is back. Writes loadtest/results/chaos.{json,svg} and
 chaos_pods.svg (`kubectl get pods` mid-outage) plus chaos_start/chaos_end for Grafana.
-Exits non-zero if any experiment fails the bar.
+Exits non-zero if any experiment fails the bar. Argo CD's automated sync is paused while it
+runs (a deploy freeze), so a pending commit can't undo an experiment halfway.
 """
 import json
 import subprocess
@@ -39,8 +40,8 @@ records: list[dict] = []
 snapshots: dict[str, str] = {}
 
 
-def kubectl(*args: str, check: bool = True) -> str:
-    out = subprocess.run(["kubectl", "-n", NS, *args], capture_output=True, text=True)
+def kubectl(*args: str, check: bool = True, ns: str = NS) -> str:
+    out = subprocess.run(["kubectl", "-n", ns, *args], capture_output=True, text=True)
     if check and out.returncode:
         raise RuntimeError(f"kubectl {' '.join(args)}: {out.stderr.strip()}")
     return out.stdout
@@ -138,6 +139,17 @@ EXPERIMENTS = [("postgres killed", postgres_killed), ("one sqlgen killed", one_s
                ("LLM errors 50%", llm_errors), ("redis killed", redis_killed)]
 
 
+# --- deploy freeze ---------------------------------------------------------------------------
+# Argo CD's automated sync would apply any not-yet-synced commit the moment an experiment makes
+# the app OutOfSync -- reverting the experiment mid-run. Freeze it for the duration.
+AUTOMATED = '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":false}}}}'
+
+
+def freeze_deploys(on: bool) -> None:
+    kubectl("patch", "application", "retail-chatbot", "--type", "merge", "-p",
+            '{"spec":{"syncPolicy":{"automated":null}}}' if on else AUTOMATED, ns="argocd")
+
+
 # --- traffic ---------------------------------------------------------------------------------
 def start_traffic() -> subprocess.Popen:
     kubectl("delete", "pod", TRAFFIC_POD, "--ignore-not-found", "--wait=true")
@@ -201,6 +213,7 @@ def render(rows: list[dict]) -> None:
 
 def main() -> int:
     RESULTS.mkdir(parents=True, exist_ok=True)
+    freeze_deploys(True)
     proc = start_traffic()
     print("warming up (traffic fills the cache and the stale fallback) ...")
     time.sleep(40)
@@ -219,6 +232,7 @@ def main() -> int:
         proc.terminate()
         kubectl("delete", "pod", TRAFFIC_POD, "--ignore-not-found", "--wait=false", check=False)
         set_error_rate("0")
+        freeze_deploys(False)          # back to automated sync; the app returns to Synced
     (RESULTS / "chaos.json").write_text(json.dumps({"experiments": rows, "snapshots": snapshots}, indent=2))
     render(rows)
     Console().print(f"{sum(r['pass'] for r in rows)}/{len(rows)} experiments passed")

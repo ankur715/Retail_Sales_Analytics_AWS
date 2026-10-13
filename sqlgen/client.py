@@ -29,6 +29,12 @@ SERVICE_CONFIG = json.dumps({
                       "retryPolicy": {"maxAttempts": 3, "initialBackoff": "0.1s", "maxBackoff": "1s",
                                       "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]}}],
 })
+# When every pod dies at once (a crash, a bad deploy), the replacements come back on new IPs.
+# gRPC's defaults would keep dialing the dead ones: at most one DNS lookup per 30 s and
+# reconnect backoff growing to 2 min. Re-resolve within a second and cap the backoff at 1 s.
+CHANNEL_OPTIONS = [("grpc.service_config", SERVICE_CONFIG), ("grpc.enable_retries", 1),
+                   ("grpc.dns_min_time_between_resolutions_ms", 1000),
+                   ("grpc.initial_reconnect_backoff_ms", 100), ("grpc.max_reconnect_backoff_ms", 1000)]
 _stub = None
 _lock = threading.Lock()
 
@@ -38,8 +44,7 @@ def stub() -> sqlgen_pb2_grpc.SqlGeneratorStub:
     global _stub
     with _lock:
         if _stub is None:
-            channel = grpc.insecure_channel(config.SQLGEN_ADDR, options=[("grpc.service_config", SERVICE_CONFIG),
-                                                                         ("grpc.enable_retries", 1)])
+            channel = grpc.insecure_channel(config.SQLGEN_ADDR, options=CHANNEL_OPTIONS)
             _stub = sqlgen_pb2_grpc.SqlGeneratorStub(channel)
         return _stub
 

@@ -297,3 +297,6 @@ def test_channel_uses_round_robin_and_retries():
     assert policy["loadBalancingConfig"] == [{"round_robin": {}}]
     assert policy["methodConfig"][0]["retryPolicy"]["retryableStatusCodes"] == ["UNAVAILABLE"]
     assert grpc.StatusCode.UNAVAILABLE in sqlgen_client.KINDS
+    options = dict(sqlgen_client.CHANNEL_OPTIONS)            # find replacement pods within seconds, not 30 s
+    assert options["grpc.dns_min_time_between_resolutions_ms"] <= 1000
+    assert options["grpc.max_reconnect_backoff_ms"] <= 1000

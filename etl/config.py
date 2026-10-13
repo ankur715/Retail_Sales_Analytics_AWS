@@ -56,6 +56,12 @@ FAKE_LLM_LATENCY_MS = float(os.environ.get("FAKE_LLM_LATENCY_MS", "0"))   # mean
 FAKE_LLM_ERROR_RATE = float(os.environ.get("FAKE_LLM_ERROR_RATE", "0"))   # 0..1, share raising "busy"
 CHAT_REDSHIFT_USER = os.environ.get("CHAT_REDSHIFT_USER", "chat_reader")
 CHAT_REDSHIFT_PASSWORD = os.environ.get("CHAT_REDSHIFT_PASSWORD", "")
+# Answer cache + idempotency keys. Unset = an in-process store (tests, a laptop uvicorn);
+# the compose stack points it at its Redis.
+REDIS_URL = os.environ.get("REDIS_URL", "")
+# SQL generation (sqlgen/). Unset = in-process; host:port = the gRPC service (compose: sqlgen:50051).
+SQLGEN_ADDR = os.environ.get("SQLGEN_ADDR", "")
+SQLGEN_TIMEOUT_S = float(os.environ.get("SQLGEN_TIMEOUT_S", "60"))
 
 # --- Pipeline Triage Agent (triage/): Bedrock Converse tool-use loop over read-only tools ---
 # nova-lite (default, cheapest) | claude-haiku | a full Bedrock model id / inference profile

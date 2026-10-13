@@ -17,6 +17,15 @@ opentelemetry-sdk>=1.27
 opentelemetry-exporter-otlp-proto-http>=1.27
 opentelemetry-instrumentation-fastapi>=0.48b0
 prometheus-client>=0.21
+opentelemetry-instrumentation-grpc>=0.48b0
+
+# milestone 2: answer cache + Idempotency-Key in Redis (chatbot/store.py); SQL generation over gRPC
+# (sqlgen/). grpcio-tools generates the committed stubs; it's pinned to the version Airflow's
+# constraint file allows, so the same stubs load under both CI jobs (and newer protobuf runtimes).
+redis>=5
+grpcio>=1.81
+grpcio-tools==1.81.1
+protobuf>=6.33
 
 # mock retailer API
 fastapi>=0.115
@@ -26,3 +35,4 @@ uvicorn>=0.30
 pytest>=8
 moto[s3]>=5
 httpx>=0.27
+fakeredis>=2.23

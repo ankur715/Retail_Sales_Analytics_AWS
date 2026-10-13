@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from chatbot import app as chat_app
 from chatbot import catalog, guard, llm, llm_bedrock, llm_gemini
 
+
 @pytest.fixture(autouse=True)
 def gemini_provider(monkeypatch):
     """Chatbot tests run against the (faked) gemini provider; the suite default is none."""
@@ -82,17 +83,17 @@ def test_catalog_examples_pass_the_guard_with_the_views_they_use():
 
 
 # ---------------------------------------------------------------------------
-# /api/chat flow
+# /v1/chat flow (POST /api/chat is the same handler; see test_services.py)
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def fakes(monkeypatch):
     calls = {"write_sql": [], "query": []}
     monkeypatch.setattr(chat_app.config, "GOOGLE_API_KEY", "test-key")
-    monkeypatch.setattr(chat_app, "_cache", {})
     monkeypatch.setattr(llm, "route", lambda q: llm.Route(views=["chat.v_sales_by_week"], reason="totals"))
     monkeypatch.setattr(llm, "summarize", lambda q, sql, cols, rows, as_of: f"{len(rows)} rows through {as_of}")
     monkeypatch.setattr(chat_app.db, "known_values", lambda cols: {"chat.v_sales_by_week.retailer": ["Harbor Mart"]})
     monkeypatch.setattr(chat_app.db, "data_as_of", lambda: "2026-10-17")
+    monkeypatch.setattr(chat_app.db, "data_version", lambda: "2026-10-18 06:00:00")
 
     def fake_query(sql):
         calls["query"].append(sql)
@@ -111,7 +112,7 @@ def test_chat_routes_writes_validates_and_answers(fakes, monkeypatch):
                                "WHERE weeks_ago = 0 GROUP BY retailer", explanation="totals")
 
     monkeypatch.setattr(llm, "write_sql", write_sql)
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "Total sales by retailer last week"}).json()
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "Total sales by retailer last week"}).json()
     assert r["answer"] == "1 rows through 2026-10-17" and r["views"] == ["chat.v_sales_by_week"]
     assert r["sql"].endswith("LIMIT 500") and r["rows"] == [["Harbor Mart", 100.0]]
     assert "View chat.v_sales_by_week" in seen["details"] and "v_weekly_sales" not in seen["details"]
@@ -127,7 +128,7 @@ def test_chat_repairs_once_when_sql_uses_an_unrouted_table(fakes, monkeypatch):
         return next(plans)
 
     monkeypatch.setattr(llm, "write_sql", write_sql)
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "anything at all"}).json()
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "anything at all"}).json()
     assert r["error"] is None and r["explanation"] == "fixed"
     assert errors[0] is None and "fact.fact_sales is not allowed" in errors[1]
     assert len(fakes["query"]) == 1                      # the unsafe query never reached the database
@@ -137,21 +138,20 @@ def test_chat_caches_repeated_questions(fakes, monkeypatch):
     monkeypatch.setattr(llm, "write_sql", lambda *a, **k: llm.SqlPlan(sql="SELECT brand FROM chat.v_sales_by_week",
                                                                       explanation="x"))
     client = TestClient(chat_app.app)
-    first = client.post("/api/chat", json={"message": "Brands please"}).json()
-    second = client.post("/api/chat", json={"message": "  brands   PLEASE "}).json()
+    first = client.post("/v1/chat", json={"message": "Brands please"}).json()
+    second = client.post("/v1/chat", json={"message": "  brands   PLEASE "}).json()
     assert not first["cached"] and second["cached"] and len(fakes["query"]) == 1
 
 
 def test_chat_off_topic_question_runs_no_query(fakes, monkeypatch):
     monkeypatch.setattr(llm, "route", lambda q: llm.Route(views=[], reason="not about sales data"))
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "What's the weather?"}).json()
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "What's the weather?"}).json()
     assert "not about sales data" in r["answer"] and fakes["query"] == []
 
 
 def test_chat_without_api_key_is_503(monkeypatch):
     monkeypatch.setattr(chat_app.config, "GOOGLE_API_KEY", "")
-    monkeypatch.setattr(chat_app, "_cache", {})
-    assert TestClient(chat_app.app).post("/api/chat", json={"message": "hello there"}).status_code == 503
+    assert TestClient(chat_app.app).post("/v1/chat", json={"message": "hello there"}).status_code == 503
 
 
 def test_gemini_overload_retries_then_returns_clear_503(monkeypatch):
@@ -170,8 +170,7 @@ def test_gemini_overload_retries_then_returns_clear_503(monkeypatch):
     monkeypatch.setattr(llm_gemini, "client", lambda: Busy)
     monkeypatch.setattr(llm_gemini.time, "sleep", lambda s: None)
     monkeypatch.setattr(chat_app.config, "GOOGLE_API_KEY", "test-key")
-    monkeypatch.setattr(chat_app, "_cache", {})
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "Total sales last week"})
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "Total sales last week"})
     assert r.status_code == 503 and "busy" in r.json()["detail"]
     assert len(attempts) == len(llm_gemini.RETRY_DELAYS) + 1
 
@@ -193,8 +192,7 @@ def test_daily_quota_fails_fast_without_retrying(monkeypatch):
     monkeypatch.setattr(llm_gemini, "client", lambda: OutOfQuota)
     monkeypatch.setattr(llm_gemini.time, "sleep", lambda s: pytest.fail("must not sleep on a daily quota"))
     monkeypatch.setattr(chat_app.config, "GOOGLE_API_KEY", "test-key")
-    monkeypatch.setattr(chat_app, "_cache", {})
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "Total sales last week"})
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "Total sales last week"})
     assert r.status_code == 503 and "daily quota" in r.json()["detail"] and len(attempts) == 1
 
 
@@ -264,8 +262,7 @@ def test_bedrock_permission_error_is_a_config_problem_and_a_clear_503(bedrock, m
     import httpx2
     response = httpx2.Response(403, request=httpx2.Request("POST", "https://bedrock.example"))
     bedrock.error = anthropic.PermissionDeniedError("no model access", response=response, body=None)
-    monkeypatch.setattr(chat_app, "_cache", {})
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "Total sales last week"})
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "Total sales last week"})
     assert r.status_code == 503 and "isn't configured" in r.json()["detail"]
     assert "model access" in r.json()["reason"]
 
@@ -278,7 +275,6 @@ def test_unknown_provider_is_rejected(monkeypatch):
 
 def test_llm_provider_none_turns_the_chatbot_off(monkeypatch):
     monkeypatch.setattr(llm.config, "LLM_PROVIDER", "none")
-    monkeypatch.setattr(chat_app, "_cache", {})
     assert not llm.configured()
-    r = TestClient(chat_app.app).post("/api/chat", json={"message": "Total sales last week"})
+    r = TestClient(chat_app.app).post("/v1/chat", json={"message": "Total sales last week"})
     assert r.status_code == 503 and "LLM_PROVIDER=none" in r.json()["detail"]

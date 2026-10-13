@@ -2,7 +2,8 @@
 
 Traces (OpenTelemetry): one trace per request, with a span per step --
   llm.route, db.known_values, llm.write_sql, sql.validate, db.query, db.data_as_of, llm.summarize
--- exported over OTLP to the collector -> Jaeger. Off unless OTEL_EXPORTER_OTLP_ENDPOINT is
+-- exported over OTLP to the collector -> Jaeger. With SQLGEN_ADDR set, write_sql runs in the
+sqlgen service (rpc.sqlgen.WriteSql here, llm.write_sql there) and the trace spans both. Off unless OTEL_EXPORTER_OTLP_ENDPOINT is
 set, so tests, CI and the laptop export nothing (the OpenTelemetry API is then a no-op).
 
 Metrics (Prometheus, GET /metrics), the four golden signals:
@@ -10,7 +11,9 @@ Metrics (Prometheus, GET /metrics), the four golden signals:
   errors      the same counter, status >= 500; chatbot_step_errors_total{step}
   latency     chatbot_request_seconds{route}, chatbot_step_seconds{step}
   saturation  chatbot_requests_in_flight
-plus chatbot_cache_total{result} for the answer cache.
+plus chatbot_cache_total{result} and chatbot_answer_seconds{cache} (hit vs miss latency) for the answer cache, chatbot_idempotency_total{result} for
+Idempotency-Key handling, and chatbot_store_errors_total{op} when Redis (or the data-version
+lookup) fails and the request carries on without it.
 
 Spans never carry question text, answers or result rows -- only the step, model, view
 names, row counts and the validated SQL.
@@ -33,7 +36,12 @@ IN_FLIGHT = Gauge("chatbot_requests_in_flight", "Requests being handled right no
 STEP_SECONDS = Histogram("chatbot_step_seconds", "Time per chat step", ["step"], buckets=SECONDS)
 STEP_ERRORS = Counter("chatbot_step_errors_total", "Chat steps that raised", ["step"])
 CACHE = Counter("chatbot_cache_total", "Answer cache lookups", ["result"])
-UNTRACKED = {"/metrics", "/api/health"}
+# Hits take milliseconds, so this one gets finer low buckets than SECONDS
+ANSWER_SECONDS = Histogram("chatbot_answer_seconds", "Time to answer a chat question, by cache result", ["cache"],
+                           buckets=(0.001, 0.0025, 0.005) + SECONDS)
+IDEMPOTENCY = Counter("chatbot_idempotency_total", "Requests carrying an Idempotency-Key", ["result"])
+STORE_ERRORS = Counter("chatbot_store_errors_total", "Store or data-version failures the request survived", ["op"])
+UNTRACKED = {"/metrics", "/api/health", "/v1/health"}
 
 
 @contextmanager
@@ -50,19 +58,30 @@ def step(name: str, **attributes):
             STEP_SECONDS.labels(name).observe(time.perf_counter() - started)
 
 
-def _setup_tracing(app: FastAPI) -> None:
+def init_tracing(service: str) -> bool:
+    """Export this process's spans as `service`, if OTEL_EXPORTER_OTLP_ENDPOINT is set.
+    Shared with the sqlgen service (sqlgen/server.py)."""
     if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        return
+        return False
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-    provider = TracerProvider(resource=Resource.create({"service.name": SERVICE}))
+    provider = TracerProvider(resource=Resource.create({"service.name": service}))
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))   # endpoint from the env var
     trace.set_tracer_provider(provider)
+    return True
+
+
+def _setup_tracing(app: FastAPI) -> None:
+    if not init_tracing(SERVICE):
+        return
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
+
     FastAPIInstrumentor.instrument_app(app, excluded_urls=",".join(UNTRACKED))
+    GrpcInstrumentorClient().instrument()   # carries the trace into the sqlgen service
 
 
 def setup(app: FastAPI) -> None:

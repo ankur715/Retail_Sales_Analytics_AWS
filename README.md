@@ -34,6 +34,7 @@ to approve. See [Pipeline Triage Agent](#pipeline-triage-agent).
 | **Analytics chatbot** | Plain-English question → SQL on curated views (read-only user, validated SQL) → answer with its data | FastAPI, Claude on Bedrock or Gemini |
 | **Pipeline Triage Agent** | When a load fails, investigates with read-only tools and writes a diagnosis and a fix for a person to approve | Bedrock Converse tool use, Nova Lite (Claude Haiku 4.5 optional) |
 | **Observability** | A trace span per chatbot step, a golden-signals dashboard and a k6 load test at 1x and 10x: the three LLM calls are 99% of latency, the database about 1% | OpenTelemetry, Jaeger, Prometheus, Grafana, k6, Docker Compose in a Codespace |
+| **Services and data tier** | Versioned `/v1` API; answer cache in Redis, retired by each new load (a hit takes 3 ms vs 2.2 s for a miss); safe retries with `Idempotency-Key`; SQL generation as a gRPC service; a CI check that blocks risky migrations | FastAPI, Redis, gRPC + protobuf, GitHub Actions |
 
 <table>
 <tr>
@@ -288,9 +289,11 @@ A separate always-on FastAPI service (`chatbot/`). It isn't part of Airflow:
 the DAGs keep the data fresh, and the chatbot only reads curated views.
 
 ```
-POST /api/chat {"message": "Top 5 products for Cobalt Outdoor in the last 4 weeks"}
+POST /v1/chat {"message": "Top 5 products for Cobalt Outdoor in the last 4 weeks"}
+ 0. cache      same question + same data version within 15 min -> the stored answer (Redis)
  1. route      Gemini sees only a one-line summary of each view -> picks the views it needs
  2. write_sql  Gemini gets ONLY those views' columns, known values and examples -> one SELECT (JSON output)
+               (in the sqlgen gRPC service when SQLGEN_ADDR is set)
  3. validate   sqlglot: one read-only statement, only the routed views, LIMIT <= 500
  4. run        as chat_reader (SELECT on chat.* only, 30 s timeout)
                on a validation/SQL error: one repair round with the exact error
@@ -328,8 +331,9 @@ summing inventory across weeks) are written there once.
 - **Query safety:** sqlglot parses the SQL rather than keyword-matching it
   (Web_App's check would reject a column named `updated_at`). Results are
   capped at 500 rows, with a 30 s timeout.
-- **Load and cost:** repeated questions are cached for 15 minutes, so they
-  don't call Gemini or wake Redshift.
+- **Load and cost:** repeated questions are cached for 15 minutes in Redis,
+  so they don't call the model or wake Redshift. A new load retires the cached
+  answers ([services and data tier](#services-and-data-tier)).
 - **Gemini errors:**
   - overload (503) and per-minute limits (429): retried with backoff,
     honouring Gemini's `retryDelay`
@@ -610,9 +614,10 @@ Person(analyst, "Analyst", "Asks sales questions")
 System_Ext(k6, "k6", "Load test: 1x = 2 users, 10x = 20 users")
 System_Ext(llm, "LLM provider", "Fake (in-process) here; Claude on Bedrock or Gemini in production")
 Container_Boundary(app, "app profile") {
-  Container(chatbot, "Chatbot", "FastAPI", "route, write SQL, validate, query, summarize")
+  Container(chatbot, "Chatbot", "FastAPI", "cache, route, validate, query, summarize")
+  Container(sqlgen, "sqlgen", "gRPC", "write SQL (milestone 2)")
   ContainerDb(pg, "Postgres", "Copy of the chat.* views", "Read-only chat_reader")
-  ContainerDb(redis, "Redis", "Answer cache (milestone 2)")
+  ContainerDb(redis, "Redis", "Answer cache + Idempotency-Key records (milestone 2)")
 }
 Container_Boundary(obs, "obs profile") {
   Container(otel, "OTel Collector", "OTLP")
@@ -620,10 +625,13 @@ Container_Boundary(obs, "obs profile") {
   Container(prom, "Prometheus", "Metrics")
   Container(grafana, "Grafana", "Golden-signals dashboard")
 }
-Rel(analyst, chatbot, "POST /api/chat")
-Rel(k6, chatbot, "POST /api/chat")
-Rel(chatbot, llm, "3 calls per question")
+Rel(analyst, chatbot, "POST /v1/chat")
+Rel(k6, chatbot, "POST /v1/chat")
+Rel(chatbot, sqlgen, "WriteSql", "gRPC")
+Rel(chatbot, llm, "route, summarize")
+Rel(sqlgen, llm, "write_sql")
 Rel(chatbot, pg, "SELECT")
+Rel(chatbot, redis, "GET / SET")
 Rel(chatbot, otel, "Spans", "OTLP/HTTP")
 Rel(otel, jaeger, "Spans", "OTLP/gRPC")
 Rel(prom, chatbot, "Scrapes /metrics", "every 5 s")
@@ -671,7 +679,7 @@ estimates percentiles from histogram buckets; k6 measures every request.
 docker compose --profile app --profile obs up -d --build      # chatbot, Postgres, Redis + collector, Jaeger, Prometheus, Grafana
 docker compose --profile load run --rm k6 run -e LOAD=1x /scripts/chat.js
 docker compose --profile load run --rm k6 run -e LOAD=10x /scripts/chat.js
-.venv/bin/python -m scripts.screenshots                        # retake the three images above
+.venv/bin/python -m scripts.screenshots --milestone 1          # retake the three images above
 docker compose --profile app --profile obs down                # stop when done
 ```
 
@@ -681,6 +689,74 @@ opens the chatbot, Grafana and Jaeger on `localhost`. The Postgres seed comes fr
 the laptop's IP). Spans carry no question text, answers or rows. Tracing is off unless
 `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so tests and CI send nothing. What went wrong along
 the way is in [docs/m1-what-broke.md](docs/m1-what-broke.md).
+
+## Services and data tier
+
+Milestone 1 showed the model calls are 99% of request time. This milestone
+makes the service cheaper to call again and easier to change.
+
+- **A versioned API.** `POST /v1/chat` and `GET /v1/health`. The old `/api/*`
+  routes still work, marked deprecated, with `Deprecation` and `Link` headers
+  pointing to `/v1`.
+- **An answer cache in Redis, retired by each load.** Answers are keyed by
+  the question and the data version (the latest successful load in
+  `chat.v_data_freshness`), so a new load makes older answers unreachable.
+  They survive a restart and are shared by every replica. If Redis is down,
+  requests run uncached; if the database is down, cached answers are still
+  served.
+- **Safe retries.** A client that sends `Idempotency-Key` and retries gets
+  the first response back (`Idempotent-Replayed: true`), not a second run of
+  the model calls. Reusing a key for a different question returns 422; a
+  duplicate sent while the original is running returns 409.
+- **SQL generation as a gRPC service** (`sqlgen/`, contract in
+  `sqlgen.proto`). The step most likely to change on its own (prompts, model
+  choice, RAG later) can be deployed and scaled separately. It adds 1.9 ms
+  per request, and model errors still reach the user as a clear 503.
+- **A migration-safety check** (`scripts/check_migrations.py`, its own CI
+  job). It fails a PR that edits an applied migration, or adds a drop,
+  truncate, rename, type change or unbounded delete without a written reason
+  (`-- migration-safety: allow <rule>: <reason>`).
+
+Decisions and trade-offs: [ADR 0002](docs/adr/0002-service-boundaries-and-data-tier.md).
+
+<img src="pics/api_swagger_v1.jpg" alt="Swagger UI at /docs: a v1 group with GET /v1/health and POST /v1/chat expanded to show its optional Idempotency-Key header, and a legacy (deprecated) group with /api/health and /api/chat struck through" width="900">
+
+*`/docs`: the `/v1` routes, the `Idempotency-Key` header on `POST /v1/chat`,
+and the old `/api` routes still served but struck through as deprecated.*
+
+<img src="pics/cache_hit_vs_miss.jpg" alt="Grafana panels over a 4-minute 10x load test: answer latency on a log scale with cache misses at about 2 s (p50) and 6 s (p95) and cache hits at about 1 ms, a 71% cache hit ratio, and 2.16 idempotent replays per second" width="900">
+
+*A 10x load test with 70% repeated questions. Misses still take seconds
+(three model calls); hits take under a millisecond inside the service (log
+scale). 71% of questions were answered from Redis.*
+
+| k6, 10x (20 users), 4 min | Milestone 1, no cache | Milestone 2, cache on |
+|---|---|---|
+| Throughput | 7.99 req/s | 28.7 req/s |
+| Failed | 0% | 0% |
+| Cache hit p50 / p95 | n/a | 3.1 / 11.7 ms |
+| Cache miss p50 / p95 | 2.17 / 5.13 s | 2.16 / 5.12 s |
+| Idempotent retries replayed | n/a | 622 of 622 |
+
+<img src="pics/idempotency_replay.jpg" alt="Terminal table from the idempotency demo: the first request takes 2.6 s, its retry with the same key returns in 4 ms with Idempotent-Replayed true and an identical body, the same key with a different body gets 422, a duplicate while running gets 409, and 6 requests cause only 2 model runs" width="760">
+
+*Six requests against the running stack, two model runs. A retry costs
+4 ms instead of 2.6 s and returns the identical body. Misusing a key gets a
+clear 409 or 422 instead of a second answer.*
+
+### Run it (in the Codespace)
+
+```bash
+docker compose --profile app --profile obs up -d --build      # now also starts sqlgen
+docker compose --profile load run --rm k6 run -e LOAD=10x -e CACHE=on -e DURATION=4m /scripts/chat.js
+.venv/bin/python -m scripts.idempotency_demo                   # replay / 409 / 422 against the live stack
+.venv/bin/python -m scripts.screenshots --milestone 2          # retake the three images above
+python -m scripts.check_migrations --base origin/dev           # the CI migration check (fine on the laptop too)
+```
+
+Locally and in tests, everything runs in one process: with `REDIS_URL` and
+`SQLGEN_ADDR` unset, the cache uses memory and SQL generation is a function
+call. What went wrong: [docs/m2-what-broke.md](docs/m2-what-broke.md).
 
 ## Dummy data
 
@@ -767,11 +843,12 @@ To run one pipeline from the CLI without Airflow (same steps as its DAG):
 ## Tests
 
 ```bash
-.venv/bin/pytest -q tests                  # 113 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
+.venv/bin/pytest -q tests                  # 170 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
 cd airflow && ../.venv/bin/pytest -q tests # 15 DAG tests: one DAG per pipeline, subflow shape, reconcile gates the merge, every Redshift writer pooled, priority order, failure path (FAILED, then triage, then email; none can raise)
 ```
 
-CI (`.github/workflows/ci.yml`) runs both suites plus `terraform fmt` and
+CI (`.github/workflows/ci.yml`) runs both suites, checks the gRPC stubs match
+`sqlgen.proto`, runs the migration-safety check, and runs `terraform fmt` and
 `terraform validate` on every push to `dev`/`main` and on every PR.
 
 ## Verified on live AWS
@@ -820,7 +897,9 @@ everything (`force_destroy` on the dummy-data bucket).
 
 The observability stack and load tests cost nothing on AWS: they run in a
 2-core GitHub Codespace against the fake LLM and a Postgres copy, using the
-free monthly Codespaces hours. The one AWS step, exporting the `chat.*` views
+free monthly Codespaces hours. Milestone 2's Redis and gRPC service run there
+too, and its answer cache lowers the real cost: a repeated question makes no
+model call and no Redshift query. The one AWS step, exporting the `chat.*` views
 (about 2,000 rows), is a single short Redshift session, about $0.05.
 
 ## Layout
@@ -833,16 +912,17 @@ airflow/dags/                  DAG factory + metadata sync DAG
 airflow/start_airflow.sh       local Airflow per environment
 data_gen/                      synthetic catalog + retailer file layouts
 mock_api/                      FastAPI retailer API (bearer token, cursor paging)
-chatbot/                       analytics chatbot: routing, SQL guard, read-only DB access, Bedrock/Gemini/fake providers, telemetry, FastAPI + chat page
+chatbot/                       analytics chatbot: /v1 API, routing, SQL guard, read-only DB access, Redis cache + idempotency, Bedrock/Gemini/fake providers, telemetry, chat page
+sqlgen/                        SQL generation gRPC service: sqlgen.proto, generated stubs, server, client
 config/chat_catalog.yaml       chatbot metadata: curated views, columns, known values, examples
 triage/                        Pipeline Triage Agent: Converse tool-use loop, read-only tools and session, CLI
 infra/terraform/               S3, IAM (COPY role + pipeline user), Redshift Serverless, usage limit
 tests/, airflow/tests/         unit + DAG integrity tests
 .devcontainer/                 Codespace: Python 3.11, docker-in-docker, sshd, gh, Terraform, AWS CLI, Claude Code
-docker-compose.yml             local stack, by profile: app (chatbot, Postgres, Redis), obs (OTel, Jaeger, Prometheus, Grafana), load (k6)
+docker-compose.yml             local stack, by profile: app (chatbot, sqlgen, Postgres, Redis), obs (OTel, Jaeger, Prometheus, Grafana), load (k6)
 docker/                        chatbot image + Postgres seed (chat.* views, read-only chat_reader)
 observability/                 OTel Collector, Prometheus and Grafana config; golden-signals dashboard JSON
-loadtest/chat.js               k6 load test (1x / 10x)
-scripts/                       export_chat_views.py (Redshift -> Postgres seed), screenshots.py (README images)
-docs/adr/, docs/m1-what-broke.md   decisions and lessons per milestone
+loadtest/chat.js               k6 load test (1x / 10x; CACHE=on for cache hits and idempotent retries)
+scripts/                       export_chat_views.py (Redshift -> Postgres seed), screenshots.py (README images), idempotency_demo.py, check_migrations.py (CI)
+docs/adr/, docs/m*-what-broke.md   decisions and lessons per milestone
 ```

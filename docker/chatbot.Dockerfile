@@ -1,9 +1,11 @@
-# The analytics chatbot for the local Compose stack (docker-compose.yml, profile `app`).
+# The analytics chatbot and the sqlgen gRPC service for the local Compose stack
+# (docker-compose.yml, profile `app`): one image, two commands.
 FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY chatbot/ chatbot/
+COPY sqlgen/ sqlgen/
 COPY etl/ etl/
 COPY config/ config/
 EXPOSE 8000

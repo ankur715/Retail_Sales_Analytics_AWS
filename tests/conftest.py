@@ -40,3 +40,16 @@ def no_redshift(monkeypatch):
         raise RuntimeError("unit test tried to connect to Redshift -- fake the call instead")
 
     monkeypatch.setattr(redshift, "get_connection", refuse)
+
+
+@pytest.fixture(autouse=True)
+def fresh_cache():
+    """Every test starts with an empty in-process store (never a real Redis) and no
+    remembered data version, so cached answers can't leak between tests."""
+    from chatbot import cache, store
+
+    store.reset(store.MemoryStore())
+    cache.invalidate()
+    yield
+    store.reset()
+    cache.invalidate()

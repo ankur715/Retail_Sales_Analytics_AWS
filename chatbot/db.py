@@ -5,11 +5,28 @@ import time
 from datetime import date, datetime
 from decimal import Decimal
 
+import psycopg2
+from psycopg2.extensions import QueryCanceledError
+
 from chatbot import telemetry
 from etl import config, redshift
 
 KNOWN_VALUES_TTL = 3600   # seconds; brand/retailer lists change only when a feed is onboarded
 _known_cache: dict[str, tuple[float, list]] = {}
+
+
+class DatabaseUnavailable(RuntimeError):
+    """The database can't be reached (down, restarting, refusing connections) -- as opposed to
+    a bad query, which the chatbot repairs. Becomes a retryable 503, or a stale answer."""
+
+
+def _connect():
+    try:
+        return redshift.get_connection(user=config.CHAT_REDSHIFT_USER, password=config.CHAT_REDSHIFT_PASSWORD,
+                                       attempts=config.CHAT_DB_ATTEMPTS,
+                                       connect_timeout=config.CHAT_DB_CONNECT_TIMEOUT_S)
+    except psycopg2.OperationalError as e:
+        raise DatabaseUnavailable(str(e).strip().splitlines()[0]) from e
 
 
 def _jsonable(v):
@@ -23,7 +40,7 @@ def _jsonable(v):
 def query(sql: str) -> dict:
     with telemetry.step("db.query", **{"db.system": "postgresql", "db.name": config.REDSHIFT_DB,
                                        "db.statement": sql[:1000]}) as span:
-        conn = redshift.get_connection(user=config.CHAT_REDSHIFT_USER, password=config.CHAT_REDSHIFT_PASSWORD)
+        conn = _connect()
         try:
             with conn.cursor() as cur:
                 cur.execute("SET statement_timeout TO 30000;")   # also set on the user; belt and braces
@@ -34,8 +51,15 @@ def query(sql: str) -> dict:
             span.set_attribute("db.rows", len(rows))
             return {"columns": columns, "rows": rows, "row_count": len(rows),
                     "elapsed_ms": int((time.monotonic() - started) * 1000)}
+        except QueryCanceledError:
+            raise                      # the 30 s timeout: a query problem, so the repair round handles it
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:   # connection lost mid-query
+            raise DatabaseUnavailable(str(e).strip().splitlines()[0]) from e
         finally:
-            conn.close()
+            try:
+                conn.close()
+            except psycopg2.Error:
+                pass
 
 
 def known_values(columns_by_view: dict[str, list[str]]) -> dict[str, list]:

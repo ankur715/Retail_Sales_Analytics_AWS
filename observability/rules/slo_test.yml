@@ -1,0 +1,111 @@
+# promtool unit tests for slo.yml:  promtool test rules observability/rules/slo_test.yml
+# (CI runs this in the prom/prometheus image; see .github/workflows/ci.yml)
+# Label values are copied from a real /metrics scrape (e.g. le="8.0", as the Python client writes it).
+rule_files: [slo.yml]
+evaluation_interval: 1m
+
+tests:
+  # 10% of requests failing for an hour: 20x the 0.5% budget -> the fast-burn page fires
+  - interval: 1m
+    input_series:
+      - series: 'chatbot_requests_total{route="/v1/chat",status="200"}'
+        values: '0+90x70'
+      - series: 'chatbot_requests_total{route="/v1/chat",status="503"}'
+        values: '0+10x70'
+    promql_expr_test:
+      - expr: sli:chat_errors:ratio_rate5m
+        eval_time: 30m
+        exp_samples:
+          - labels: 'sli:chat_errors:ratio_rate5m'
+            value: 0.1
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: ChatbotAvailabilityBudgetBurnFast
+        exp_alerts:
+          - exp_labels: {severity: page, slo: availability}
+            exp_annotations:
+              summary: "Chatbot is burning its error budget 14x too fast"
+              runbook: "Check chatbot_step_errors_total by step and dependency health: sqlgen, Redis, Postgres, the LLM"
+
+  # 0.2% failing: inside the budget -> nothing fires; the legacy route counts too
+  - interval: 1m
+    input_series:
+      - series: 'chatbot_requests_total{route="/v1/chat",status="200"}'
+        values: '0+499x70'
+      - series: 'chatbot_requests_total{route="/api/chat",status="503"}'
+        values: '0+1x70'
+    promql_expr_test:
+      - expr: sli:chat_errors:ratio_rate1h
+        eval_time: 65m
+        exp_samples:
+          - labels: 'sli:chat_errors:ratio_rate1h'
+            value: 0.002
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: ChatbotAvailabilityBudgetBurnFast
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: ChatbotAvailabilityBudgetBurnSlow
+        exp_alerts: []
+
+  # no errors at all: the error ratio is 0, not "no data" (the `or vector(0)`)
+  - interval: 1m
+    input_series:
+      - series: 'chatbot_requests_total{route="/v1/chat",status="200"}'
+        values: '0+100x10'
+    promql_expr_test:
+      - expr: sli:chat_errors:ratio_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'sli:chat_errors:ratio_rate5m'
+            value: 0
+
+  # 90% of requests slower than 8 s -> the latency fast-burn page fires
+  - interval: 1m
+    input_series:
+      - series: 'chatbot_request_seconds_bucket{route="/v1/chat",le="8.0"}'
+        values: '0+10x70'
+      - series: 'chatbot_request_seconds_count{route="/v1/chat"}'
+        values: '0+100x70'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: ChatbotLatencyBudgetBurnFast
+        exp_alerts:
+          - exp_labels: {severity: page, slo: latency}
+            exp_annotations:
+              summary: "Most chat requests take over 8 s"
+              runbook: "Usually the model: compare chatbot_step_seconds for llm.* steps; check the cache hit ratio"
+
+  # sqlgen gone (pods deleted, so no `up` series at all) while the chatbot is healthy
+  - interval: 1m
+    input_series:
+      - series: 'up{job="chatbot",instance="chatbot-a:8000"}'
+        values: '1x14'
+      - series: 'up{job="sqlgen",instance="sqlgen-a:9101"}'
+        values: '1 1 1 _x11'   # gone after 2m; queries still see it for the 5m lookback
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SqlgenDown
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: SqlgenDown
+        exp_alerts:
+          - exp_labels: {severity: page, job: sqlgen}
+            exp_annotations:
+              summary: "No healthy sqlgen instance: every uncached question fails or falls back to a stale answer"
+      - eval_time: 11m
+        alertname: ChatbotDown
+        exp_alerts: []
+
+  # serving stale fallbacks for 5+ minutes -> a warning that a dependency is down
+  - interval: 1m
+    input_series:
+      - series: 'chatbot_cache_total{result="stale"}'
+        values: '0+3x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ChatbotServingStale
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "The chatbot is answering from stale fallbacks: the model or the database is down"

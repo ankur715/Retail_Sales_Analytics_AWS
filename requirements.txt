@@ -27,6 +27,10 @@ grpcio>=1.81
 grpcio-tools==1.81.1
 protobuf>=6.33
 
+# milestone 3: load_completed events on Redpanda (etl/events.py publishes, chatbot/events.py consumes);
+# the Kafka API client, at the version Airflow's constraint file pins
+confluent-kafka>=2.5
+
 # mock retailer API
 fastapi>=0.115
 uvicorn>=0.30

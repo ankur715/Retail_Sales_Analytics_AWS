@@ -1,0 +1,27 @@
+# Argo CD watches deploy/k8s on GitHub and keeps the kind cluster in sync with it.
+#   automated + prune  a merged change (or a deleted manifest) reaches the cluster without anyone
+#                      running kubectl
+#   selfHeal: false    a hand-made change (a hotfix, a chaos experiment) shows as OutOfSync instead of
+#                      being undone within seconds. selfHeal only covers commits already synced: a
+#                      NEWER commit is applied on the next OutOfSync, so chaos/run.py also pauses
+#                      automated sync while it runs (a deploy freeze) and restores it afterwards.
+#   ServerSideApply    the Postgres seed ConfigMap (~230 KB) is too big for client-side apply's
+#                      last-applied annotation (256 KB limit)
+# deploy/kind/up.sh sets targetRevision to the branch being worked on.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: retail-chatbot
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ankur715/Retail_Sales_Analytics_AWS.git
+    targetRevision: dev
+    path: deploy/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: retail
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

@@ -1,0 +1,44 @@
+# Redpanda (Kafka API) for load_completed events: one node in dev-container mode, sized for a
+# Codespace. Topics are created on first use (dev-container mode turns auto-creation on).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: redpanda } }
+  template:
+    metadata:
+      labels: { app: redpanda }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: redpanda
+          image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+          args:
+            - redpanda
+            - start
+            - --mode=dev-container
+            - --smp=1
+            - --memory=512M
+            - --reserve-memory=0M
+            - --overprovisioned
+            - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+            - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+          # (dev-container mode already enables topic auto-creation; `rpk redpanda start` has no --set)
+          ports: [{ containerPort: 9092, name: kafka }]
+          readinessProbe:
+            tcpSocket: { port: kafka }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+spec:
+  selector: { app: redpanda }
+  ports: [{ port: 9092, targetPort: kafka }]

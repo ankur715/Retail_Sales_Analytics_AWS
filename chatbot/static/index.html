@@ -121,6 +121,7 @@ async function ask(text) {
     const d = await res.json();
     reply.textContent = "";
     if (!res.ok) { reply.append(el("div", "err", d.detail || `Error ${res.status}`)); return; }
+    if (d.stale) reply.append(el("div", "err", "Live data is unavailable right now, so this is the last answer we had. Check the date below."));
     reply.append(el("div", d.error ? "err" : "", d.answer));
     if (d.rows && d.rows.length) {
       const det = el("details"); det.open = d.rows.length <= 12;
@@ -135,7 +136,7 @@ async function ask(text) {
     const bits = [];
     if (d.views && d.views.length) bits.push(`views: ${d.views.join(", ")}`);
     if (d.data_as_of) bits.push(`data through week ending ${d.data_as_of}`);
-    if (d.cached) bits.push("cached");
+    if (d.cached) bits.push(d.stale ? "stale fallback" : "cached");
     if (bits.length) reply.append(el("div", "meta", bits.join(" · ")));
   } catch (e) {
     reply.textContent = ""; reply.append(el("div", "err", "Request failed: " + e));

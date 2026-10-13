@@ -1,0 +1,136 @@
+# Chatbot SLOs (milestone 3). Loaded by Prometheus in the Compose stack and in kind; unit-tested
+# with promtool in CI (slo_test.yml). Rationale and thresholds: docs/adr/0003-production-operations.md.
+#
+#   availability  99.5% of chat requests (POST /v1/chat, /api/chat) succeed (not 5xx), over 28 days
+#                 -> error budget 0.5%. A stale fallback is a 200: it counts as available, and
+#                 ChatbotServingStale says a dependency is down.
+#   latency       95% of chat requests finish within 8 s -> budget 5% slower than 8 s
+#                 (bucket label le="8.0": the Python client writes bucket bounds as floats, so
+#                 le="8" matches nothing -- the latency SLO silently had no data until this was fixed)
+#
+# Alerts use multi-window burn rates (Google SRE workbook, ch. 5): page when the budget burns
+# 14.4x too fast over 1 h (2% of a 28-day budget in an hour) or 6x over 6 h, confirmed by a
+# short window so the alert stops soon after the problem does; open a ticket at 1x over 3 days.
+groups:
+  - name: chatbot-slo-recording
+    interval: 30s
+    rules:
+      - record: sli:chat_errors:ratio_rate5m
+        expr: |
+          (sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat",status=~"5.."}[5m])) or vector(0))
+          / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[5m]))
+      - record: sli:chat_slow:ratio_rate5m
+        expr: |
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[5m]))
+          / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[5m]))
+      - record: sli:chat_errors:ratio_rate30m
+        expr: |
+          (sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat",status=~"5.."}[30m])) or vector(0))
+          / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[30m]))
+      - record: sli:chat_slow:ratio_rate30m
+        expr: |
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[30m]))
+          / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[30m]))
+      - record: sli:chat_errors:ratio_rate1h
+        expr: |
+          (sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat",status=~"5.."}[1h])) or vector(0))
+          / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[1h]))
+      - record: sli:chat_slow:ratio_rate1h
+        expr: |
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[1h]))
+          / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[1h]))
+      - record: sli:chat_errors:ratio_rate6h
+        expr: |
+          (sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat",status=~"5.."}[6h])) or vector(0))
+          / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[6h]))
+      - record: sli:chat_slow:ratio_rate6h
+        expr: |
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[6h]))
+          / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[6h]))
+      - record: sli:chat_errors:ratio_rate3d
+        expr: |
+          (sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat",status=~"5.."}[3d])) or vector(0))
+          / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[3d]))
+      - record: sli:chat_slow:ratio_rate3d
+        expr: |
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[3d]))
+          / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[3d]))
+      - record: slo:chat_availability:error_budget_remaining
+        expr: |
+          1 - (
+            (sum(increase(chatbot_requests_total{route=~"/v1/chat|/api/chat",status=~"5.."}[28d])) or vector(0))
+            / sum(increase(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[28d]))
+          ) / 0.005
+      - record: slo:chat_latency:error_budget_remaining
+        expr: |
+          1 - (
+            1 - sum(increase(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[28d]))
+            / sum(increase(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[28d]))
+          ) / 0.05
+
+  - name: chatbot-slo-alerts
+    rules:
+      - alert: ChatbotAvailabilityBudgetBurnFast
+        expr: sli:chat_errors:ratio_rate1h > (14.4 * 0.005) and sli:chat_errors:ratio_rate5m > (14.4 * 0.005)
+        for: 2m
+        labels: {severity: page, slo: availability}
+        annotations:
+          summary: "Chatbot is burning its error budget 14x too fast"
+          runbook: "Check chatbot_step_errors_total by step and dependency health: sqlgen, Redis, Postgres, the LLM"
+      - alert: ChatbotAvailabilityBudgetBurnSlow
+        expr: sli:chat_errors:ratio_rate6h > (6 * 0.005) and sli:chat_errors:ratio_rate30m > (6 * 0.005)
+        for: 15m
+        labels: {severity: page, slo: availability}
+        annotations:
+          summary: "Chatbot error budget burning 6x too fast over 6 h"
+      - alert: ChatbotAvailabilityBudgetTicket
+        expr: sli:chat_errors:ratio_rate3d > 0.005 and sli:chat_errors:ratio_rate6h > 0.005
+        for: 1h
+        labels: {severity: ticket, slo: availability}
+        annotations:
+          summary: "Chatbot is on track to miss its 99.5% availability SLO"
+      - alert: ChatbotLatencyBudgetBurnFast
+        expr: sli:chat_slow:ratio_rate1h > (14.4 * 0.05) and sli:chat_slow:ratio_rate5m > (14.4 * 0.05)
+        for: 2m
+        labels: {severity: page, slo: latency}
+        annotations:
+          summary: "Most chat requests take over 8 s"
+          runbook: "Usually the model: compare chatbot_step_seconds for llm.* steps; check the cache hit ratio"
+      - alert: ChatbotLatencyBudgetBurnSlow
+        expr: sli:chat_slow:ratio_rate6h > (6 * 0.05) and sli:chat_slow:ratio_rate30m > (6 * 0.05)
+        for: 15m
+        labels: {severity: page, slo: latency}
+        annotations:
+          summary: "Chat latency budget burning 6x too fast over 6 h"
+
+  - name: chatbot-dependencies
+    rules:
+      - alert: ChatbotDown
+        expr: absent(up{job="chatbot"} == 1)   # absent() can't copy labels through `== 1`, so job is set below
+        for: 1m
+        labels: {severity: page, job: chatbot}
+        annotations:
+          summary: "No healthy chatbot instance is being scraped"
+      - alert: SqlgenDown
+        expr: absent(up{job="sqlgen"} == 1)
+        for: 1m
+        labels: {severity: page, job: sqlgen}
+        annotations:
+          summary: "No healthy sqlgen instance: every uncached question fails or falls back to a stale answer"
+      - alert: ChatbotServingStale
+        expr: sum(rate(chatbot_cache_total{result="stale"}[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "The chatbot is answering from stale fallbacks: the model or the database is down"
+      - alert: ChatbotStoreErrors
+        expr: sum(rate(chatbot_store_errors_total[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis or the data-version lookup is failing; answers are uncached (more model calls, more cost)"
+      - alert: LoadEventsFailing
+        expr: sum(increase(chatbot_events_total{result=~"broker_error|consumer_crash"}[10m])) > 5
+        labels: {severity: warning}
+        annotations:
+          summary: "The load_completed listener can't read Redpanda; cached answers trail new loads by up to 60 s"

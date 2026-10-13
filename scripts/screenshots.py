@@ -15,6 +15,12 @@ scripts.idempotency_demo (loadtest/results/idempotency.svg):
   api_swagger_v1.jpg              /docs: the /v1 routes, Idempotency-Key, legacy /api deprecated
   cache_hit_vs_miss.jpg           Grafana: answer latency on a cache hit vs a miss, hit ratio
   idempotency_replay.jpg          the demo's table: replay, 422, 409, model runs
+Milestone 3 -- on the kind cluster (deploy/kind/up.sh, then deploy/kind/forward.sh) after
+chaos.run (loadtest/results/chaos*.svg, chaos_start, chaos_end):
+  argocd_app_synced.jpg           Argo CD: retail-chatbot Synced + Healthy, its resource tree
+  chaos_kubectl_pods.jpg          `kubectl get pods` two seconds into the Postgres kill
+  chaos_results.jpg               the chaos table: what users got per experiment
+  slo_error_budget.jpg            Grafana SLO dashboard across the chaos run
 """
 import argparse
 import json
@@ -29,6 +35,7 @@ from rich.table import Table
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS, PICS = ROOT / "loadtest" / "results", ROOT / "pics"
 GRAFANA, JAEGER, CHATBOT = "http://localhost:3000", "http://localhost:16686", "http://localhost:8000"
+ARGOCD = "http://localhost:8080"
 VIEWPORT = {"width": 1440, "height": 900}
 
 
@@ -125,6 +132,42 @@ def milestone2() -> list[str]:
     return ["api_swagger_v1", "cache_hit_vs_miss", "idempotency_replay"]
 
 
+def milestone3() -> list[str]:
+    start, end = _epoch("chaos_start"), _epoch("chaos_end")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=VIEWPORT)
+
+        # Argo CD (anonymous read-only): the app's sync/health and resource tree
+        page.goto(f"{ARGOCD}/applications/argocd/retail-chatbot?view=tree")
+        page.wait_for_selector("text=Synced", timeout=60_000)
+        page.wait_for_timeout(4000)
+        # Redact: the sync panel shows commit authors' email addresses
+        page.evaluate(r"""() => {
+            const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            for (let n; (n = walk.nextNode());)
+                n.nodeValue = n.nodeValue.replace(/\s*<?[\w.+-]+@[\w-]+(\.[\w-]+)+>?/g, "");
+        }""")
+        # zoom the resource tree out so the Deployments and pods fit, not just the ConfigMaps
+        page.add_style_tag(content=".application-resource-tree {zoom: 0.5}")
+        page.wait_for_timeout(1000)
+        page.screenshot(path=str(PICS / "argocd_app_synced.jpg"), type="jpeg", quality=85)
+
+        # Grafana SLO dashboard over the chaos run (budget spent, burn rate, alerts, fallbacks)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.goto(f"{GRAFANA}/d/chatbot-slo/?orgId=1&from={(start - 60) * 1000}&to={(end + 60) * 1000}"
+                  f"&theme=light&kiosk&refresh=")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(6000)
+        page.screenshot(path=str(PICS / "slo_error_budget.jpg"), type="jpeg", quality=85,
+                        clip={"x": 0, "y": 0, "width": 1440, "height": 800})
+
+        svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / "chaos_pods.svg", PICS / "chaos_kubectl_pods.jpg")
+        svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / "chaos.svg", PICS / "chaos_results.jpg")
+        browser.close()
+    return ["argocd_app_synced", "chaos_kubectl_pods", "chaos_results", "slo_error_budget"]
+
+
 def milestone1() -> list[str]:
     start, mid, end = _epoch("start"), _epoch("mid"), _epoch("end")
     svg = k6_svg()
@@ -153,8 +196,8 @@ def milestone1() -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--milestone", type=int, choices=(1, 2), default=2)
-    names = {1: milestone1, 2: milestone2}[parser.parse_args().milestone]()
+    parser.add_argument("--milestone", type=int, choices=(1, 2, 3), default=3)
+    names = {1: milestone1, 2: milestone2, 3: milestone3}[parser.parse_args().milestone]()
     for name in names:
         print(name, f"{(PICS / f'{name}.jpg').stat().st_size // 1024} KB")
 

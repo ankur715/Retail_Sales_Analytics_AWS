@@ -1,0 +1,59 @@
+# Postgres copy of the chat.* views, seeded on start from the same init scripts and CSVs as the
+# Compose stack. Data is an emptyDir on purpose: it's a disposable copy, so a killed pod (the
+# chaos test) comes back seeded and identical.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{ containerPort: 5432, name: postgres }]
+          env:
+            - { name: POSTGRES_DB, value: retail_dev }
+            - { name: POSTGRES_USER, value: postgres }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: retail-local, key: POSTGRES_PASSWORD } }
+            - name: CHAT_READER_PASSWORD
+              valueFrom: { secretKeyRef: { name: retail-local, key: CHAT_READER_PASSWORD } }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-d", "retail_dev"] }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 384Mi }
+          volumeMounts:
+            - { name: initdb, mountPath: /docker-entrypoint-initdb.d }
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: initdb   # scripts at the top, CSVs under data/ -- where 10_chat_views.sql COPYs from
+          projected:
+            defaultMode: 0755
+            sources:
+              - configMap: { name: postgres-initdb }
+              - configMap:
+                  name: postgres-seed
+                  items:
+                    - { key: v_calendar.csv, path: data/v_calendar.csv }
+                    - { key: v_data_freshness.csv, path: data/v_data_freshness.csv }
+                    - { key: v_sales_by_week.csv, path: data/v_sales_by_week.csv }
+                    - { key: v_weekly_sales.csv, path: data/v_weekly_sales.csv }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: postgres }]

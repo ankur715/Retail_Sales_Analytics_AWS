@@ -24,7 +24,9 @@ import time
 from chatbot import db, store, telemetry
 
 TTL = 15 * 60          # seconds an answer stays cached
+STALE_TTL = 24 * 3600  # seconds the last answer per question is kept as a fallback (last())
 VERSION_TTL = 60       # seconds between data-version lookups
+VERSION_RETRY = 10     # seconds before retrying a failed lookup (don't hammer a down database)
 _version: tuple[float, str] | None = None   # (looked up at, version)
 _lock = threading.Lock()
 
@@ -43,7 +45,10 @@ def data_version() -> str | None:
             version = str(db.data_version() or "none")
     except Exception:
         telemetry.STORE_ERRORS.labels("data_version").inc()
-        return _version[1] if _version else None   # stale beats nothing while the database is down
+        with _lock:
+            if _version:   # keep the last known version, and look again in VERSION_RETRY seconds
+                _version = (time.monotonic() - VERSION_TTL + VERSION_RETRY, _version[1])
+            return _version[1] if _version else None   # stale beats nothing while the database is down
     with _lock:
         _version = (time.monotonic(), version)
     return version
@@ -56,8 +61,23 @@ def invalidate() -> None:
         _version = None
 
 
+def _hash(question: str) -> str:
+    return hashlib.sha256(normalize(question).encode()).hexdigest()[:32]
+
+
 def _key(question: str, version: str) -> str:
-    return f"chat:answer:{version}:{hashlib.sha256(normalize(question).encode()).hexdigest()[:32]}"
+    return f"chat:answer:{version}:{_hash(question)}"
+
+
+def last(question: str) -> dict | None:
+    """The most recent answer to this question from ANY data version (kept 24 h): the
+    fallback when the model or the database is down. Its data_as_of says how old it is."""
+    try:
+        raw = store.get().get(f"chat:last:{_hash(question)}")
+    except Exception:
+        telemetry.STORE_ERRORS.labels("cache_last").inc()
+        return None
+    return json.loads(raw) if raw else None
 
 
 def get(question: str, version: str | None) -> dict | None:
@@ -79,6 +99,8 @@ def put(question: str, version: str | None, payload: dict) -> None:
     if version is None:
         return
     try:
-        store.get().set(_key(question, version), json.dumps(payload), ex=TTL)
+        raw = json.dumps(payload)
+        store.get().set(_key(question, version), raw, ex=TTL)
+        store.get().set(f"chat:last:{_hash(question)}", raw, ex=STALE_TTL)
     except Exception:
         telemetry.STORE_ERRORS.labels("cache_put").inc()

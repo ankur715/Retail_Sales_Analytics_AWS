@@ -1,6 +1,7 @@
 """How the chatbot gets SQL written: over gRPC to the sqlgen service when SQLGEN_ADDR is
 set (the compose stack), otherwise in-process (tests, a laptop uvicorn). Same signature
 and result as chatbot.llm.write_sql either way."""
+import json
 import threading
 
 import grpc
@@ -16,6 +17,18 @@ from sqlgen import sqlgen_pb2, sqlgen_pb2_grpc
 KINDS = {grpc.StatusCode.UNAVAILABLE: "busy", grpc.StatusCode.DEADLINE_EXCEEDED: "busy",
          grpc.StatusCode.RESOURCE_EXHAUSTED: "quota", grpc.StatusCode.FAILED_PRECONDITION: "config",
          grpc.StatusCode.PERMISSION_DENIED: "declined"}
+# Client-side policy (gRPC service config):
+#  - round_robin: with a headless Kubernetes Service (dns:///sqlgen-headless:50051) the client
+#    sees every sqlgen pod and spreads calls over them. A plain ClusterIP would pin this
+#    process's single HTTP/2 connection -- and so all its calls -- to one pod.
+#  - retry UNAVAILABLE up to 3 attempts: a pod that just died, or a transient busy model, gets
+#    another try on another pod, inside the same deadline.
+SERVICE_CONFIG = json.dumps({
+    "loadBalancingConfig": [{"round_robin": {}}],
+    "methodConfig": [{"name": [{"service": "retail.sqlgen.v1.SqlGenerator"}],
+                      "retryPolicy": {"maxAttempts": 3, "initialBackoff": "0.1s", "maxBackoff": "1s",
+                                      "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]}}],
+})
 _stub = None
 _lock = threading.Lock()
 
@@ -25,7 +38,9 @@ def stub() -> sqlgen_pb2_grpc.SqlGeneratorStub:
     global _stub
     with _lock:
         if _stub is None:
-            _stub = sqlgen_pb2_grpc.SqlGeneratorStub(grpc.insecure_channel(config.SQLGEN_ADDR))
+            channel = grpc.insecure_channel(config.SQLGEN_ADDR, options=[("grpc.service_config", SERVICE_CONFIG),
+                                                                         ("grpc.enable_retries", 1)])
+            _stub = sqlgen_pb2_grpc.SqlGeneratorStub(channel)
         return _stub
 
 

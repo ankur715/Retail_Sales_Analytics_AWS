@@ -56,12 +56,21 @@ FAKE_LLM_LATENCY_MS = float(os.environ.get("FAKE_LLM_LATENCY_MS", "0"))   # mean
 FAKE_LLM_ERROR_RATE = float(os.environ.get("FAKE_LLM_ERROR_RATE", "0"))   # 0..1, share raising "busy"
 CHAT_REDSHIFT_USER = os.environ.get("CHAT_REDSHIFT_USER", "chat_reader")
 CHAT_REDSHIFT_PASSWORD = os.environ.get("CHAT_REDSHIFT_PASSWORD", "")
+# A person is waiting: the chatbot gives up on a down database fast (the ETL keeps the patient
+# 4-attempt default). 10 s still covers a paused Redshift Serverless waking up.
+CHAT_DB_CONNECT_TIMEOUT_S = int(os.environ.get("CHAT_DB_CONNECT_TIMEOUT_S", "10"))
+CHAT_DB_ATTEMPTS = int(os.environ.get("CHAT_DB_ATTEMPTS", "2"))
 # Answer cache + idempotency keys. Unset = an in-process store (tests, a laptop uvicorn);
 # the compose stack points it at its Redis.
 REDIS_URL = os.environ.get("REDIS_URL", "")
 # SQL generation (sqlgen/). Unset = in-process; host:port = the gRPC service (compose: sqlgen:50051).
 SQLGEN_ADDR = os.environ.get("SQLGEN_ADDR", "")
 SQLGEN_TIMEOUT_S = float(os.environ.get("SQLGEN_TIMEOUT_S", "60"))
+
+# --- Events (milestone 3): a load_completed message per successful load, on Redpanda (Kafka API) ---
+# Unset = no events (CI, tests, the laptop); the chatbot then falls back to its 60 s version check.
+EVENTS_BOOTSTRAP = os.environ.get("EVENTS_BOOTSTRAP", "")          # e.g. redpanda:9092
+EVENTS_TOPIC = os.environ.get("EVENTS_TOPIC", "retail.load_completed")
 
 # --- Pipeline Triage Agent (triage/): Bedrock Converse tool-use loop over read-only tools ---
 # nova-lite (default, cheapest) | claude-haiku | a full Bedrock model id / inference profile

@@ -1,0 +1,31 @@
+# Argo CD settings for the local cluster (applied by deploy/kind/up.sh after the install).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+  labels: { app.kubernetes.io/name: argocd-cm, app.kubernetes.io/part-of: argocd }
+data:
+  # deploy/k8s reuses config files from elsewhere in the repo (one copy each)
+  kustomize.buildOptions: --load-restrictor LoadRestrictionsNone
+  # read-only viewing without a password, for the port-forwarded UI in a private Codespace
+  users.anonymous.enabled: "true"
+  timeout.reconciliation: 60s
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+  labels: { app.kubernetes.io/name: argocd-rbac-cm, app.kubernetes.io/part-of: argocd }
+data:
+  policy.default: role:readonly
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+  labels: { app.kubernetes.io/name: argocd-cmd-params-cm, app.kubernetes.io/part-of: argocd }
+data:
+  server.insecure: "true"   # plain HTTP behind kubectl port-forward; nothing leaves the Codespace

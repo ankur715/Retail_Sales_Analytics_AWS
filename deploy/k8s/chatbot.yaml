@@ -1,0 +1,59 @@
+# The chatbot, two replicas. Readiness only checks the process itself (/v1/health), not its
+# dependencies: with Postgres or the model down it still serves cached and stale answers, so
+# pulling it out of the Service would turn a partial outage into a full one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector: { matchLabels: { app: chatbot } }
+  template:
+    metadata:
+      labels: { app: chatbot }
+    spec:
+      containers:
+        - name: chatbot
+          image: retail-chatbot
+          ports: [{ containerPort: 8000, name: http }]
+          env:
+            - { name: ENV, value: dev }
+            - { name: LLM_PROVIDER, value: fake }
+            - { name: FAKE_LLM_LATENCY_MS, value: "800" }
+            - { name: FAKE_LLM_ERROR_RATE, value: "0" }
+            - { name: REDSHIFT_HOST, value: postgres }
+            - { name: REDSHIFT_PORT, value: "5432" }
+            - { name: REDSHIFT_DB, value: retail_dev }
+            - { name: REDSHIFT_SSLMODE, value: disable }
+            - { name: CHAT_REDSHIFT_USER, value: chat_reader }
+            - name: CHAT_REDSHIFT_PASSWORD
+              valueFrom: { secretKeyRef: { name: retail-local, key: CHAT_READER_PASSWORD } }
+            - { name: CHAT_DB_CONNECT_TIMEOUT_S, value: "3" }   # a local copy, not a sleeping Redshift
+            - { name: CHAT_DB_ATTEMPTS, value: "1" }
+            - { name: REDIS_URL, value: "redis://redis:6379/0" }
+            - { name: SQLGEN_ADDR, value: "dns:///sqlgen-headless.retail.svc.cluster.local:50051" }
+            - { name: EVENTS_BOOTSTRAP, value: "redpanda:9092" }
+          lifecycle:
+            # Stay up 5 s after Kubernetes starts removing the pod from the Service, so requests
+            # already routed here still land (uvicorn then drains in-flight ones on SIGTERM).
+            preStop: { exec: { command: ["sleep", "5"] } }
+          readinessProbe:
+            httpGet: { path: /v1/health, port: http }
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /v1/health, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot
+spec:
+  selector: { app: chatbot }
+  ports: [{ port: 8000, targetPort: http, name: http }]

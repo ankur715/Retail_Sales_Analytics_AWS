@@ -1,0 +1,26 @@
+# Argo CD watches deploy/k8s on GitHub and keeps the kind cluster in sync with it.
+#   automated + prune  a merged change (or a deleted manifest) reaches the cluster without anyone
+#                      running kubectl
+#   selfHeal: false    the chaos tests change the live cluster on purpose (deleting pods, raising
+#                      the fake LLM's error rate); Argo CD shows OutOfSync while they run instead of
+#                      undoing them mid-experiment. The chaos script restores the manifests' values.
+#   ServerSideApply    the Postgres seed ConfigMap (~230 KB) is too big for client-side apply's
+#                      last-applied annotation (256 KB limit)
+# deploy/kind/up.sh sets targetRevision to the branch being worked on.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: retail-chatbot
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ankur715/Retail_Sales_Analytics_AWS.git
+    targetRevision: dev
+    path: deploy/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: retail
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

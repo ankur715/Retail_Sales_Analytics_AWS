@@ -15,6 +15,7 @@ Run:  python -m sqlgen.server        (compose service `sqlgen`, port 50051)
 """
 import logging
 import os
+import signal
 from concurrent import futures
 
 import grpc
@@ -28,6 +29,10 @@ SERVICE = "sqlgen"
 CODES = {"busy": grpc.StatusCode.UNAVAILABLE, "quota": grpc.StatusCode.RESOURCE_EXHAUSTED,
          "config": grpc.StatusCode.FAILED_PRECONDITION, "declined": grpc.StatusCode.PERMISSION_DENIED}
 log = logging.getLogger(SERVICE)
+# Close each client connection after ~30 s (clients reconnect transparently): with client-side
+# round_robin over a headless Service, that's how clients notice pods added by a scale-up.
+OPTIONS = [("grpc.max_connection_age_ms", 30_000), ("grpc.max_connection_age_grace_ms", 10_000)]
+STOP_GRACE_S = 15   # on SIGTERM, in-flight calls get this long to finish (pod terminationGracePeriodSeconds: 20)
 
 
 class SqlGenerator(sqlgen_pb2_grpc.SqlGeneratorServicer):
@@ -48,7 +53,7 @@ class SqlGenerator(sqlgen_pb2_grpc.SqlGeneratorServicer):
 
 def build(address: str, workers: int) -> tuple[grpc.Server, int]:
     """A started-later server bound to `address`; returns it and the bound port (tests use port 0)."""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=workers))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=workers), options=OPTIONS)
     sqlgen_pb2_grpc.add_SqlGeneratorServicer_to_server(SqlGenerator(), server)
     return server, server.add_insecure_port(address)
 
@@ -64,6 +69,8 @@ def main() -> None:
                          int(os.environ.get("SQLGEN_WORKERS", "32")))
     server.start()
     log.info("sqlgen listening on :%s (provider %s)", port, llm.config.LLM_PROVIDER)
+    # Kubernetes sends SIGTERM before killing a pod: stop taking new calls, let running ones finish.
+    signal.signal(signal.SIGTERM, lambda *_: (log.info("SIGTERM: draining"), server.stop(STOP_GRACE_S)))
     server.wait_for_termination()
 
 

@@ -40,6 +40,27 @@ jobs:
           MIGRATION_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
         run: python -m scripts.check_migrations
 
+  prometheus-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SLO rules parse, and their promtool unit tests pass (burn-rate alerts fire when they should)
+        run: |
+          docker run --rm -v "$PWD/observability:/obs" --entrypoint promtool prom/prometheus:v2.55.1 check rules /obs/rules/slo.yml
+          docker run --rm -v "$PWD/observability:/obs" -w /obs/rules --entrypoint promtool prom/prometheus:v2.55.1 test rules slo_test.yml
+
+  k8s-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: deploy/k8s renders (as Argo CD builds it) and every object matches the Kubernetes 1.31 schemas
+        run: |
+          kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s > rendered.yaml
+          docker run --rm -v "$PWD:/w" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary \
+            -kubernetes-version 1.31.2 /w/rendered.yaml
+          docker run --rm -v "$PWD:/w" ghcr.io/yannh/kubeconform:v0.6.7 -summary -ignore-missing-schemas \
+            /w/deploy/argocd/application.yaml /w/deploy/argocd/argocd-cm.yaml
+
   dag-tests:
     runs-on: ubuntu-latest
     env:

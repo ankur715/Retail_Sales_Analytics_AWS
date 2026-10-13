@@ -1,0 +1,43 @@
+# SQL generation (gRPC), two replicas. The chatbot reaches them through the HEADLESS service
+# with client-side round_robin (sqlgen/client.py): a normal ClusterIP would pin each chatbot's
+# HTTP/2 connection to one pod. The server ends connections after 30 s so clients re-resolve
+# DNS and pick up new pods (sqlgen/server.py).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqlgen
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: sqlgen } }
+  template:
+    metadata:
+      labels: { app: sqlgen }
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: sqlgen
+          image: retail-chatbot
+          command: ["python", "-m", "sqlgen.server"]
+          ports:
+            - { containerPort: 50051, name: grpc }
+            - { containerPort: 9101, name: metrics }
+          env:
+            - { name: ENV, value: dev }
+            - { name: LLM_PROVIDER, value: fake }
+            - { name: FAKE_LLM_LATENCY_MS, value: "800" }
+            - { name: FAKE_LLM_ERROR_RATE, value: "0" }
+          readinessProbe:
+            tcpSocket: { port: grpc }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqlgen-headless
+spec:
+  clusterIP: None
+  selector: { app: sqlgen }
+  ports: [{ port: 50051, targetPort: grpc, name: grpc }]

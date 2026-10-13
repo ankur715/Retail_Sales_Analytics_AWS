@@ -52,7 +52,7 @@ def build_message(*, pipeline_id: str | None, load_id: str | None, task_id: str,
     if triage_note:
         triage_text = triage_note
     elif triage_status == "skipped":
-        triage_text = "Triage agent is off (LLM_PROVIDER=none)."
+        triage_text = f"Triage agent is off (LLM_PROVIDER={config.LLM_PROVIDER})."
     elif load_id is None:
         triage_text = "No triage: the task failed before a load existed."
     else:

@@ -19,7 +19,7 @@ def get_connection(dbname: str | None = None, attempts: int = 4,
                 dbname=dbname or config.REDSHIFT_DB,
                 user=user or config.REDSHIFT_USER,              # the chatbot passes its read-only user
                 password=password or config.REDSHIFT_PASSWORD,
-                sslmode="require",
+                sslmode=config.REDSHIFT_SSLMODE,
                 connect_timeout=30,
             )
         except psycopg2.OperationalError:

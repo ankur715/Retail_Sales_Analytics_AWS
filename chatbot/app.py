@@ -19,10 +19,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from chatbot import catalog, db, guard, llm
+from chatbot import catalog, db, guard, llm, telemetry
 from etl import config
 
 app = FastAPI(title="Retail sales analytics chatbot")
+telemetry.setup(app)
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_REPAIRS = 1
 CACHE_TTL = 15 * 60   # same question within 15 min -> no Gemini or Redshift call
@@ -79,7 +80,9 @@ def chat(req: ChatRequest) -> ChatResponse:
     key = " ".join(question.lower().split())
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < CACHE_TTL:
+        telemetry.CACHE.labels("hit").inc()
         return ChatResponse(**hit[1], cached=True)
+    telemetry.CACHE.labels("miss").inc()
     if not llm.configured():
         raise HTTPException(503, "LLM features are turned off on the server (LLM_PROVIDER=none)"
                             if config.LLM_PROVIDER == "none" else
@@ -92,14 +95,17 @@ def chat(req: ChatRequest) -> ChatResponse:
                             f"sales and inventory data. ({route.reason})")
 
     # 2-4. write SQL with only those views' metadata, validate, run; one repair round on failure
-    details = catalog.detail_text(route.views, db.known_values(catalog.known_value_columns(route.views)))
+    with telemetry.step("db.known_values"):
+        known = db.known_values(catalog.known_value_columns(route.views))
+    details = catalog.detail_text(route.views, known)
     plan, error, result, sql = llm.write_sql(question, route.views, details), None, None, None
     for attempt in range(MAX_REPAIRS + 1):
         if not plan.sql.strip():
             return ChatResponse(question=question, views=route.views,
                                 answer=plan.unanswerable_reason or "That can't be answered from the available data.")
         try:
-            sql = guard.validate(plan.sql, route.views)
+            with telemetry.step("sql.validate"):
+                sql = guard.validate(plan.sql, route.views)
             result = db.query(sql)
             error = None
             break
@@ -112,7 +118,8 @@ def chat(req: ChatRequest) -> ChatResponse:
                             answer="Sorry, I couldn't build a working query for that. Try rephrasing.")
 
     # 5. answer from the rows only
-    as_of = db.data_as_of()
+    with telemetry.step("db.data_as_of"):
+        as_of = db.data_as_of()
     answer = llm.summarize(question, sql, result["columns"], result["rows"], as_of)
     payload = dict(question=question, answer=answer, views=route.views, sql=sql, explanation=plan.explanation,
                    columns=result["columns"], rows=result["rows"], row_count=result["row_count"], data_as_of=as_of)

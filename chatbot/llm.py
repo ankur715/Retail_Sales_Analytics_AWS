@@ -4,18 +4,20 @@
   write_sql()    question + ONLY those views' details -> SQL (structured output)
   summarize()    question + result rows -> a short plain-English answer
 
-LLM_PROVIDER picks who answers (the prompts are the same for both):
+LLM_PROVIDER picks who answers (the prompts are the same for all):
   gemini   chatbot/llm_gemini.py   Google Gemini (GOOGLE_API_KEY), like Web_App
   bedrock  chatbot/llm_bedrock.py  Claude on Amazon Bedrock (AWS credentials),
                                    like the Member Engagement project
+  fake     chatbot/llm_fake.py     canned answers, no model and no cost, with
+                                   configurable latency and error rate (load tests)
 """
 from importlib import import_module
 
-from chatbot import catalog
+from chatbot import catalog, telemetry
 from chatbot.llm_types import LLMUnavailable, Route, SqlPlan  # noqa: F401  (re-exported for app/tests)
 from etl import config
 
-PROVIDERS = {"gemini": "chatbot.llm_gemini", "bedrock": "chatbot.llm_bedrock"}
+PROVIDERS = {"gemini": "chatbot.llm_gemini", "bedrock": "chatbot.llm_bedrock", "fake": "chatbot.llm_fake"}
 
 
 def provider():
@@ -32,11 +34,15 @@ def configured() -> bool:
     """Whether the selected provider has what it needs to make a call."""
     if config.LLM_PROVIDER == "gemini":
         return bool(config.GOOGLE_API_KEY)
-    return config.LLM_PROVIDER in PROVIDERS   # Bedrock uses the AWS credential chain
+    return config.LLM_PROVIDER in PROVIDERS   # Bedrock uses the AWS credential chain; fake needs nothing
 
 
 def model_name() -> str:
     return provider().model_name()
+
+
+def _span_attrs() -> dict:
+    return {"llm.provider": config.LLM_PROVIDER, "llm.model": provider().model_name()}
 
 
 def route(question: str) -> Route:
@@ -47,7 +53,9 @@ months/quarters/dates). Only choose from this list:
 
 Question: "{question}"
 """
-    result = provider().json_call(prompt, Route)
+    with telemetry.step("llm.route", **_span_attrs()) as span:
+        result = provider().json_call(prompt, Route)
+        span.set_attribute("chat.views", ",".join(result.views))
     result.views = [v for v in result.views if v in catalog.view_names()]   # drop anything invented
     return result
 
@@ -71,7 +79,8 @@ these views, return an empty sql and say why.
 {retry}
 Question: "{question}"
 """
-    return provider().json_call(prompt, SqlPlan)
+    with telemetry.step("llm.write_sql", **_span_attrs(), **{"chat.repair": bool(previous_error)}):
+        return provider().json_call(prompt, SqlPlan)
 
 
 def summarize(question: str, sql: str, columns: list[str], rows: list[list], data_as_of: str | None) -> str:
@@ -89,4 +98,5 @@ SQL: {sql}
 Result ({len(rows)} rows{', first 50 shown' if len(rows) > 50 else ''}):
 {sample}
 """
-    return provider().text_call(prompt)
+    with telemetry.step("llm.summarize", **_span_attrs(), **{"chat.rows": len(rows)}):
+        return provider().text_call(prompt)

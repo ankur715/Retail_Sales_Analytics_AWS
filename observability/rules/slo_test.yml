@@ -62,7 +62,7 @@ tests:
   # 90% of requests slower than 8 s -> the latency fast-burn page fires
   - interval: 1m
     input_series:
-      - series: 'chatbot_request_seconds_bucket{route="/v1/chat",le="8"}'
+      - series: 'chatbot_request_seconds_bucket{route="/v1/chat",le="8.0"}'
         values: '0+10x70'
       - series: 'chatbot_request_seconds_count{route="/v1/chat"}'
         values: '0+100x70'

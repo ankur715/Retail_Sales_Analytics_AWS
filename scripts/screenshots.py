@@ -142,6 +142,15 @@ def milestone3() -> list[str]:
         page.goto(f"{ARGOCD}/applications/argocd/retail-chatbot?view=tree")
         page.wait_for_selector("text=Synced", timeout=60_000)
         page.wait_for_timeout(4000)
+        # Redact: the sync panel shows commit authors' email addresses
+        page.evaluate(r"""() => {
+            const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            for (let n; (n = walk.nextNode());)
+                n.nodeValue = n.nodeValue.replace(/\s*<?[\w.+-]+@[\w-]+(\.[\w-]+)+>?/g, "");
+        }""")
+        # zoom the resource tree out so the Deployments and pods fit, not just the ConfigMaps
+        page.add_style_tag(content=".application-resource-tree {zoom: 0.5}")
+        page.wait_for_timeout(1000)
         page.screenshot(path=str(PICS / "argocd_app_synced.jpg"), type="jpeg", quality=85)
 
         # Grafana SLO dashboard over the chaos run (budget spent, burn rate, alerts, fallbacks)

@@ -5,6 +5,8 @@
 #                 -> error budget 0.5%. A stale fallback is a 200: it counts as available, and
 #                 ChatbotServingStale says a dependency is down.
 #   latency       95% of chat requests finish within 8 s -> budget 5% slower than 8 s
+#                 (bucket label le="8.0": the Python client writes bucket bounds as floats, so
+#                 le="8" matches nothing -- the latency SLO silently had no data until this was fixed)
 #
 # Alerts use multi-window burn rates (Google SRE workbook, ch. 5): page when the budget burns
 # 14.4x too fast over 1 h (2% of a 28-day budget in an hour) or 6x over 6 h, confirmed by a
@@ -19,7 +21,7 @@ groups:
           / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[5m]))
       - record: sli:chat_slow:ratio_rate5m
         expr: |
-          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8"}[5m]))
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[5m]))
           / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[5m]))
       - record: sli:chat_errors:ratio_rate30m
         expr: |
@@ -27,7 +29,7 @@ groups:
           / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[30m]))
       - record: sli:chat_slow:ratio_rate30m
         expr: |
-          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8"}[30m]))
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[30m]))
           / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[30m]))
       - record: sli:chat_errors:ratio_rate1h
         expr: |
@@ -35,7 +37,7 @@ groups:
           / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[1h]))
       - record: sli:chat_slow:ratio_rate1h
         expr: |
-          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8"}[1h]))
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[1h]))
           / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[1h]))
       - record: sli:chat_errors:ratio_rate6h
         expr: |
@@ -43,7 +45,7 @@ groups:
           / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[6h]))
       - record: sli:chat_slow:ratio_rate6h
         expr: |
-          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8"}[6h]))
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[6h]))
           / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[6h]))
       - record: sli:chat_errors:ratio_rate3d
         expr: |
@@ -51,7 +53,7 @@ groups:
           / sum(rate(chatbot_requests_total{route=~"/v1/chat|/api/chat"}[3d]))
       - record: sli:chat_slow:ratio_rate3d
         expr: |
-          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8"}[3d]))
+          1 - sum(rate(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[3d]))
           / sum(rate(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[3d]))
       - record: slo:chat_availability:error_budget_remaining
         expr: |
@@ -62,7 +64,7 @@ groups:
       - record: slo:chat_latency:error_budget_remaining
         expr: |
           1 - (
-            1 - sum(increase(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8"}[28d]))
+            1 - sum(increase(chatbot_request_seconds_bucket{route=~"/v1/chat|/api/chat",le="8.0"}[28d]))
             / sum(increase(chatbot_request_seconds_count{route=~"/v1/chat|/api/chat"}[28d]))
           ) / 0.05
 

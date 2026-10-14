@@ -16,3 +16,6 @@ infra/terraform/*.tfstate.*
 infra/terraform/terraform.tfvars
 infra/terraform/tfplan
 *.tfplan
+
+# Generated local credentials (deploy/auth/up.sh): Codespace only, never committed
+.secrets/

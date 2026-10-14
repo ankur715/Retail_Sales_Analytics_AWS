@@ -11,10 +11,21 @@ spec:
       labels: { app: redis }
     spec:
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: redis
           image: redis:7-alpine
           args: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports: [{ containerPort: 6379, name: redis }]
           readinessProbe:
             exec: { command: ["redis-cli", "ping"] }
@@ -22,6 +33,12 @@ spec:
           resources:
             requests: { cpu: 20m, memory: 32Mi }
             limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: redis-data, mountPath: /data }
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+
 ---
 apiVersion: v1
 kind: Service

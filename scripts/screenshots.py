@@ -21,6 +21,12 @@ chaos.run (loadtest/results/chaos*.svg, chaos_start, chaos_end):
   chaos_kubectl_pods.jpg          `kubectl get pods` two seconds into the Postgres kill
   chaos_results.jpg               the chaos table: what users got per experiment
   slo_error_budget.jpg            Grafana SLO dashboard across the chaos run
+Milestone 4 -- after deploy/auth/up.sh and scripts.access_demo (loadtest/results/access.svg);
+RUN=<CI run id> for the CI checks shot:
+  auth_keycloak_login.jpg         the chatbot redirects to Keycloak's sign-in page
+  auth_forbidden_other_brand.jpg  signed in as aurora.analyst, a Cobalt question gets the 403
+  auth_access_matrix.jpg          the access demo's table (401 / 403 / confined rows)
+  ci_security_scans.jpg           the PR's CI run on GitHub: every job, security scans included, passing
 """
 import argparse
 import json
@@ -47,7 +53,8 @@ def typical_trace(start: int, end: int) -> str:
     """A 10x-run trace near the median duration whose LLM spans take most of the time."""
     url = (f"{JAEGER}/api/traces?service=retail-chatbot&operation=POST%20/v1/chat&limit=500"
            f"&start={start * 1_000_000}&end={end * 1_000_000}")
-    traces = json.load(urllib.request.urlopen(url))["data"]
+    # bandit B310 (urlopen schemes): the URL is the fixed local Jaeger API built above
+    traces = json.load(urllib.request.urlopen(url))["data"]  # nosec B310
     rows = []
     for t in traces:
         root = max(t["spans"], key=lambda s: s["duration"])
@@ -168,6 +175,44 @@ def milestone3() -> list[str]:
     return ["argocd_app_synced", "chaos_kubectl_pods", "chaos_results", "slo_error_budget"]
 
 
+def milestone4() -> list[str]:
+    import os
+    env = dict(line.split("=", 1) for line in (ROOT / ".secrets" / "local.env").read_text().split() if "=" in line)
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport=VIEWPORT)
+
+        page.goto(CHATBOT)                                    # not signed in -> Keycloak
+        page.wait_for_selector("#username", timeout=60_000)
+        page.wait_for_timeout(1000)
+        page.screenshot(path=str(PICS / "auth_keycloak_login.jpg"), type="jpeg", quality=85)
+
+        page.fill("#username", "aurora.analyst")              # local test user, generated password
+        page.fill("#password", env["KC_TEST_USER_PASSWORD"])
+        page.click("#kc-login")
+        page.wait_for_selector("#who.on", timeout=60_000)     # back on the chat page, signed in
+        page.fill("#q", "Sales by brand for Cobalt Outdoor in the last 4 weeks")
+        page.click("#send")
+        page.wait_for_selector(".msg .err", timeout=60_000)
+        page.wait_for_timeout(500)
+        page.screenshot(path=str(PICS / "auth_forbidden_other_brand.jpg"), type="jpeg", quality=85,
+                        clip={"x": 0, "y": 0, "width": 1440, "height": 520})
+
+        svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / "access.svg", PICS / "auth_access_matrix.jpg")
+
+        run = os.environ.get("RUN")                           # a CI run id (gh run list); public repo, no login
+        if run:
+            gh = browser.new_page(viewport={"width": 1440, "height": 1000})
+            gh.goto(f"https://github.com/ankur715/Retail_Sales_Analytics_AWS/actions/runs/{run}")
+            gh.wait_for_selector("text=secret-scan", timeout=60_000)
+            gh.wait_for_timeout(3000)
+            gh.screenshot(path=str(PICS / "ci_security_scans.jpg"), type="jpeg", quality=85,
+                          clip={"x": 0, "y": 0, "width": 1440, "height": 1000})
+        browser.close()
+    return ["auth_keycloak_login", "auth_forbidden_other_brand", "auth_access_matrix"] + \
+        (["ci_security_scans"] if os.environ.get("RUN") else [])
+
+
 def milestone1() -> list[str]:
     start, mid, end = _epoch("start"), _epoch("mid"), _epoch("end")
     svg = k6_svg()
@@ -196,8 +241,8 @@ def milestone1() -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--milestone", type=int, choices=(1, 2, 3), default=3)
-    names = {1: milestone1, 2: milestone2, 3: milestone3}[parser.parse_args().milestone]()
+    parser.add_argument("--milestone", type=int, choices=(1, 2, 3, 4), default=4)
+    names = {1: milestone1, 2: milestone2, 3: milestone3, 4: milestone4}[parser.parse_args().milestone]()
     for name in names:
         print(name, f"{(PICS / f'{name}.jpg').stat().st_size // 1024} KB")
 

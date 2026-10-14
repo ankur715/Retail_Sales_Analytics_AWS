@@ -3,6 +3,8 @@ views -> answer. A separate always-on service; it never touches the ETL
 tables or Airflow -- the DAGs only keep the data behind the views fresh.
 
     POST /v1/chat  {"message": "..."}       (optional header: Idempotency-Key)
+      auth          AUTH_MODE=oidc: a Keycloak token decides who asks and which brands they
+                    see; every query is confined to those brands (chatbot/auth.py, access.py)
       0. cache      same question, same data version, within 15 min -> stored answer (Redis)
       1. route      the LLM picks the views the question needs (catalog summaries only)
       2. write_sql  the LLM writes SQL with ONLY those views' columns/values/examples
@@ -22,12 +24,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from chatbot import cache, catalog, db, events, guard, idempotency, llm, telemetry
+from chatbot import access, auth, cache, catalog, db, events, guard, idempotency, llm, telemetry
 from etl import config
 from sqlgen import client as sqlgen
 
@@ -42,6 +45,26 @@ app = FastAPI(title="Retail sales analytics chatbot", version="2.0", lifespan=li
               description="Ask weekly retail sales and inventory questions in plain English. "
                           "Use the **/v1** routes; `/api/*` is kept for existing clients.")
 telemetry.setup(app)
+app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Browser hardening for the chat page and API. The CSP allows scripts only from this
+    origin (no inline script), and network calls only to this origin and Keycloak."""
+    response = await call_next(request)
+    if request.url.path in ("/docs", "/redoc"):   # Swagger UI loads its assets from a CDN
+        return response
+    login_origin = "/".join(config.OIDC_ISSUER.split("/")[:3]) if config.AUTH_MODE == "oidc" else ""
+    response.headers.update({
+        "Content-Security-Policy": f"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                   f"connect-src 'self' {login_origin}".strip() + "; frame-ancestors 'none'; "
+                                   "base-uri 'none'; form-action 'self'",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
+    })
+    return response
 v1 = APIRouter(prefix="/v1", tags=["v1"])
 legacy = APIRouter(prefix="/api", tags=["legacy (deprecated)"], deprecated=True)
 STATIC = Path(__file__).resolve().parent / "static"
@@ -83,6 +106,11 @@ def llm_unavailable(request: Request, exc: llm.LLMUnavailable):
                                                   "reason": str(exc)})
 
 
+@app.exception_handler(access.Forbidden)
+def forbidden(request: Request, exc: access.Forbidden):
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
 @app.exception_handler(db.DatabaseUnavailable)
 def database_unavailable(request: Request, exc: db.DatabaseUnavailable):
     return JSONResponse(status_code=503, content={"detail": MESSAGES["database"], "reason": str(exc)})
@@ -104,33 +132,47 @@ def health() -> dict:
     return _health()
 
 
+@v1.get("/auth-config", include_in_schema=False)
+def auth_config() -> dict:
+    return auth.page_config()
+
+
+@v1.get("/me")
+def me(who: access.Principal = Depends(auth.principal)) -> dict:
+    """Who the server thinks you are, and the brands you can see (null = all)."""
+    return {"username": who.username, "brands": sorted(who.brands) if who.brands is not None else None}
+
+
 IDEMPOTENCY_KEY = Header(None, alias=idempotency.HEADER,
                          description="Any unique string (e.g. a UUID). A retry with the same key and body "
                                      "returns the first response instead of asking again.")
 
 
 @v1.post("/chat", response_model=ChatResponse, responses={
+    401: {"description": "Not signed in, or the token is invalid or expired (AUTH_MODE=oidc)"},
+    403: {"description": "The question needs another brand's data, or the account has no brand"},
     409: {"description": "A request with this Idempotency-Key is still running"},
     422: {"description": "Invalid body, or an Idempotency-Key reused for a different body"},
     503: {"description": "The language model is unavailable; retry later"}})
-def chat(req: ChatRequest, idempotency_key: str | None = IDEMPOTENCY_KEY):
+def chat(req: ChatRequest, idempotency_key: str | None = IDEMPOTENCY_KEY,
+         who: access.Principal = Depends(auth.principal)):
     if not idempotency_key:
-        return answer(req)
+        return answer(req, who)
     fp = idempotency.fingerprint(req.model_dump())
-    claim = idempotency.begin(idempotency_key, fp)
+    claim = idempotency.begin(idempotency_key, fp, who.subject)
     if isinstance(claim, idempotency.Replay):
         return JSONResponse(claim.body, status_code=claim.status, headers={"Idempotent-Replayed": "true"})
     try:
-        result = answer(req)
+        result = answer(req, who)
     except BaseException:
         if claim:
-            idempotency.release(idempotency_key)   # failed: let the retry run for real
+            idempotency.release(idempotency_key, who.subject)   # failed: let the retry run for real
         raise
     if claim:
         if result.stale:   # a fallback isn't the answer to this request: let a retry try the live path
-            idempotency.release(idempotency_key)
+            idempotency.release(idempotency_key, who.subject)
         else:
-            idempotency.finish(idempotency_key, fp, 200, jsonable_encoder(result))
+            idempotency.finish(idempotency_key, fp, 200, jsonable_encoder(result), who.subject)
     return result
 
 
@@ -146,24 +188,25 @@ def health_legacy(response: Response) -> dict:
 
 
 @legacy.post("/chat", response_model=ChatResponse)
-def chat_legacy(req: ChatRequest, response: Response, idempotency_key: str | None = IDEMPOTENCY_KEY):
+def chat_legacy(req: ChatRequest, response: Response, idempotency_key: str | None = IDEMPOTENCY_KEY,
+                who: access.Principal = Depends(auth.principal)):
     """Same as POST /v1/chat."""
     _deprecated(response, "/v1/chat")
-    result = chat(req, idempotency_key)
+    result = chat(req, idempotency_key, who)
     if isinstance(result, Response):   # a replay is sent as-is, so it needs the headers itself
         _deprecated(result, "/v1/chat")
     return result
 
 
-def answer(req: ChatRequest) -> ChatResponse:
+def answer(req: ChatRequest, who: access.Principal = access.ANONYMOUS) -> ChatResponse:
     started, outcome = time.perf_counter(), "miss"
     try:
         try:
-            result = _answer(req)
+            result = _answer(req, who)
         except (llm.LLMUnavailable, db.DatabaseUnavailable):
             # Stale-if-error: the last answer to this question (any data version) beats a 503.
             # The response says stale, and data_as_of says how old the data is.
-            last = cache.last(req.message.strip())
+            last = cache.last(req.message.strip(), who.scope)
             if not last:
                 raise
             telemetry.CACHE.labels("stale").inc()
@@ -174,10 +217,10 @@ def answer(req: ChatRequest) -> ChatResponse:
         telemetry.ANSWER_SECONDS.labels(outcome).observe(time.perf_counter() - started)
 
 
-def _answer(req: ChatRequest) -> ChatResponse:
+def _answer(req: ChatRequest, who: access.Principal) -> ChatResponse:
     question = req.message.strip()
     version = cache.data_version()   # read once: the answer is filed under the data it came from
-    hit = cache.get(question, version)
+    hit = cache.get(question, version, who.scope)
     if hit:
         telemetry.CACHE.labels("hit").inc()
         return ChatResponse(**{**hit, "cached": True})
@@ -195,7 +238,7 @@ def _answer(req: ChatRequest) -> ChatResponse:
 
     # 2-4. write SQL with only those views' metadata, validate, run; one repair round on failure
     with telemetry.step("db.known_values"):
-        known = db.known_values(catalog.known_value_columns(route.views))
+        known = access.filter_known_values(db.known_values(catalog.known_value_columns(route.views)), who)
     details = catalog.detail_text(route.views, known)
     plan, error, result, sql = sqlgen.write_sql(question, route.views, details), None, None, None
     for attempt in range(MAX_REPAIRS + 1):
@@ -204,12 +247,12 @@ def _answer(req: ChatRequest) -> ChatResponse:
                                 answer=plan.unanswerable_reason or "That can't be answered from the available data.")
         try:
             with telemetry.step("sql.validate"):
-                sql = guard.validate(plan.sql, route.views)
+                sql = guard.validate(plan.sql, route.views, who.brands)
             result = db.query(sql)
             error = None
             break
-        except db.DatabaseUnavailable:
-            raise                # not the query's fault: no repair round, fall back or 503
+        except (db.DatabaseUnavailable, access.Forbidden):
+            raise                # not the query's fault: no repair round (503 / fallback, or 403)
         except Exception as e:   # UnsafeSQL or a query error: give the model the exact message once
             error = str(e).strip().splitlines()[0][:300]
             if attempt < MAX_REPAIRS:
@@ -224,7 +267,7 @@ def _answer(req: ChatRequest) -> ChatResponse:
     summary = llm.summarize(question, sql, result["columns"], result["rows"], as_of)
     payload = dict(question=question, answer=summary, views=route.views, sql=sql, explanation=plan.explanation,
                    columns=result["columns"], rows=result["rows"], row_count=result["row_count"], data_as_of=as_of)
-    cache.put(question, version, payload)
+    cache.put(question, version, payload, who.scope)
     return ChatResponse(**payload)
 
 

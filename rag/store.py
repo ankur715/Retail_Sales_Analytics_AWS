@@ -16,7 +16,8 @@ from rag.embed import DIM
 
 
 def connect(dsn: str):
-    return psycopg2.connect(dsn, connect_timeout=5)
+    # pgvector lives in schema `extensions` (docker/postgres/initdb/20_rag.sql), not public
+    return psycopg2.connect(dsn, connect_timeout=5, options="-c search_path=rag,extensions,public")
 
 
 def _vec(v: list[float]) -> str:
@@ -26,7 +27,9 @@ def _vec(v: list[float]) -> str:
 def rebuild(conn, chunks: list[Chunk], embedder) -> int:
     vectors = embedder.documents([c.embed_text for c in chunks])
     with conn.cursor() as cur:
-        cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        cur.execute("CREATE SCHEMA IF NOT EXISTS extensions")
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions")
+        cur.execute("GRANT USAGE ON SCHEMA extensions TO chat_reader")
         cur.execute("CREATE SCHEMA IF NOT EXISTS rag")
         cur.execute("DROP TABLE IF EXISTS rag.chunks")
         cur.execute(f"""CREATE TABLE rag.chunks (

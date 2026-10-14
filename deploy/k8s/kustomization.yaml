@@ -49,6 +49,7 @@ configMapGenerator:
     files:
       - ../../observability/grafana/dashboards/golden_signals.json
       - ../../observability/grafana/dashboards/slo.json
+      - ../../observability/grafana/dashboards/llm_cost.json
 secretGenerator:
   # Local-only defaults for throwaway pods, the same ones docker-compose.yml uses -- not real
   # credentials. Real secrets come out of git entirely in milestone 4 (Vault / Codespaces secrets).

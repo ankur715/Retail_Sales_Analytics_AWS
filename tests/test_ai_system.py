@@ -198,3 +198,50 @@ def test_judge_prompt_shows_the_reference_only_for_answerable_questions():
                           {"columns": ["x"], "rows": [[1]]})
     refuse = judge_prompt({"question": "q", "expect": "refuse"}, {"answer": "no"}, None)
     assert "Reference result" in answer and "no valid answer" in refuse
+
+
+# ---------------------------------------------------------------------------
+# Ollama provider (HTTP mocked)
+# ---------------------------------------------------------------------------
+class FakeHTTP:
+    def __init__(self, status=200, content='{"views": ["chat.v_sales_by_week"], "reason": "totals"}'):
+        self.status_code, self.content, self.sent = status, content, []
+
+    def __call__(self, url, json, timeout):
+        self.sent.append((url, json))
+        from types import SimpleNamespace
+        return SimpleNamespace(status_code=self.status_code, json=lambda: {
+            "message": {"content": self.content}, "prompt_eval_count": 120, "eval_count": 15})
+
+
+@pytest.fixture
+def ollama(monkeypatch):
+    monkeypatch.setattr(llm.config, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(llm.config, "OLLAMA_URL", "http://ollama:11434")
+    fake = FakeHTTP()
+    monkeypatch.setattr("requests.post", fake)
+    return fake
+
+
+def test_ollama_structured_call_sends_the_schema_and_counts_tokens(ollama):
+    with usage.track() as used:
+        route = llm.route("Total sales by retailer last week")
+    assert route.views == ["chat.v_sales_by_week"]
+    url, body = ollama.sent[0]
+    assert url == "http://ollama:11434/api/chat" and body["format"]["title"] == "Route"
+    assert (used.llm_calls, used.input_tokens, used.output_tokens, used.cost_usd) == (1, 120, 15, 0.0)
+    assert llm.configured() and llm.model_name() == "ollama/qwen2.5:1.5b"
+
+
+def test_ollama_missing_model_is_a_config_error(ollama):
+    ollama.status_code = 404
+    with pytest.raises(llm.LLMUnavailable) as e:
+        llm.route("q")
+    assert e.value.kind == "config"
+
+
+def test_ollama_malformed_output_is_retryable(ollama):
+    ollama.content = "not json"
+    with pytest.raises(llm.LLMUnavailable) as e:
+        llm.route("q")
+    assert e.value.kind == "busy"

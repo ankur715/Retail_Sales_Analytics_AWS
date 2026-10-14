@@ -10,6 +10,9 @@ LLM_PROVIDER picks who answers (the prompts are the same for all):
                                    like the Member Engagement project
   fake     chatbot/llm_fake.py     canned answers, no model and no cost, with
                                    configurable latency and error rate (load tests)
+  ollama   chatbot/llm_ollama.py   a self-hosted model via Ollama (OLLAMA_URL), optional
+
+Every provider reports the tokens each call used (chatbot/usage.py) for cost and latency per request.
 """
 from importlib import import_module
 
@@ -17,7 +20,8 @@ from chatbot import catalog, telemetry, usage
 from chatbot.llm_types import LLMUnavailable, Route, SqlPlan  # noqa: F401  (re-exported for app/tests)
 from etl import config
 
-PROVIDERS = {"gemini": "chatbot.llm_gemini", "bedrock": "chatbot.llm_bedrock", "fake": "chatbot.llm_fake"}
+PROVIDERS = {"gemini": "chatbot.llm_gemini", "bedrock": "chatbot.llm_bedrock", "fake": "chatbot.llm_fake",
+             "ollama": "chatbot.llm_ollama"}
 
 
 def provider():
@@ -34,6 +38,8 @@ def configured() -> bool:
     """Whether the selected provider has what it needs to make a call."""
     if config.LLM_PROVIDER == "gemini":
         return bool(config.GOOGLE_API_KEY)
+    if config.LLM_PROVIDER == "ollama":
+        return bool(config.OLLAMA_URL)
     return config.LLM_PROVIDER in PROVIDERS   # Bedrock uses the AWS credential chain; fake needs nothing
 
 

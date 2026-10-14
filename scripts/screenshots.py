@@ -205,7 +205,9 @@ def milestone4() -> list[str]:
             gh = browser.new_page(viewport={"width": 1440, "height": 1100})
             gh.goto(f"https://github.com/ankur715/Retail_Sales_Analytics_AWS/pull/{pr}/checks")
             gh.wait_for_load_state("networkidle")
-            gh.wait_for_timeout(3000)
+            gh.get_by_role("button", name="CI").first.click()     # expand the workflow: one row per job
+            gh.wait_for_selector("text=secret-scan", timeout=30_000)
+            gh.wait_for_timeout(2000)
             gh.screenshot(path=str(PICS / "ci_security_scans.jpg"), type="jpeg", quality=85,
                           clip={"x": 0, "y": 0, "width": 1440, "height": 900})
         browser.close()

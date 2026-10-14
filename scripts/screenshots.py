@@ -22,11 +22,11 @@ chaos.run (loadtest/results/chaos*.svg, chaos_start, chaos_end):
   chaos_results.jpg               the chaos table: what users got per experiment
   slo_error_budget.jpg            Grafana SLO dashboard across the chaos run
 Milestone 4 -- after deploy/auth/up.sh and scripts.access_demo (loadtest/results/access.svg);
-PR=<number> for the CI checks shot:
+RUN=<CI run id> for the CI checks shot:
   auth_keycloak_login.jpg         the chatbot redirects to Keycloak's sign-in page
   auth_forbidden_other_brand.jpg  signed in as aurora.analyst, a Cobalt question gets the 403
   auth_access_matrix.jpg          the access demo's table (401 / 403 / confined rows)
-  ci_security_scans.jpg           the PR's checks on GitHub, security scans passing
+  ci_security_scans.jpg           the PR's CI run on GitHub: every job, security scans included, passing
 """
 import argparse
 import json
@@ -200,19 +200,17 @@ def milestone4() -> list[str]:
 
         svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / "access.svg", PICS / "auth_access_matrix.jpg")
 
-        pr = os.environ.get("PR")
-        if pr:                                                # public repo: no login needed
-            gh = browser.new_page(viewport={"width": 1440, "height": 1100})
-            gh.goto(f"https://github.com/ankur715/Retail_Sales_Analytics_AWS/pull/{pr}/checks")
-            gh.wait_for_load_state("networkidle")
-            gh.get_by_role("button", name="CI").first.click()     # expand the workflow: one row per job
-            gh.wait_for_selector("text=secret-scan", timeout=30_000)
-            gh.wait_for_timeout(2000)
+        run = os.environ.get("RUN")                           # a CI run id (gh run list); public repo, no login
+        if run:
+            gh = browser.new_page(viewport={"width": 1440, "height": 1000})
+            gh.goto(f"https://github.com/ankur715/Retail_Sales_Analytics_AWS/actions/runs/{run}")
+            gh.wait_for_selector("text=secret-scan", timeout=60_000)
+            gh.wait_for_timeout(3000)
             gh.screenshot(path=str(PICS / "ci_security_scans.jpg"), type="jpeg", quality=85,
-                          clip={"x": 0, "y": 0, "width": 1440, "height": 900})
+                          clip={"x": 0, "y": 0, "width": 1440, "height": 1000})
         browser.close()
     return ["auth_keycloak_login", "auth_forbidden_other_brand", "auth_access_matrix"] + \
-        (["ci_security_scans"] if os.environ.get("PR") else [])
+        (["ci_security_scans"] if os.environ.get("RUN") else [])
 
 
 def milestone1() -> list[str]:

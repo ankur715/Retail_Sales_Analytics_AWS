@@ -2,6 +2,7 @@
 built by a different embedder, the chatbot falls back to the catalog's own examples (as before
 milestone 5) and counts the error (chatbot_rag_errors_total)."""
 import logging
+import re
 import threading
 from dataclasses import dataclass, field
 
@@ -15,6 +16,10 @@ log = logging.getLogger(__name__)
 ERRORS = Counter("chatbot_rag_errors_total", "Retrievals that failed and fell back to catalog examples", ["reason"])
 _conn = None
 _lock = threading.Lock()
+# Triage notes only help when the question is about a problem. The first real-model eval showed
+# Haiku repeating unrelated notes as facts in plain "when was the data loaded" answers.
+PROBLEM_WORDS = re.compile(r"\b(why|late|behind|missing|stale|fail\w*|error\w*|problem\w*|issue\w*|delay\w*|"
+                           r"broken|wrong|stuck|gap\w*)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -47,7 +52,7 @@ def retrieve(question: str, views: list[str], who: access.Principal) -> Retrieve
             conn = _connection()
             examples = store.search(conn, vector, "example", config.RAG_EXAMPLES_K, views=views)
             notes = []
-            if "chat.v_data_freshness" in views:      # "is the data current / why is it late?"
+            if "chat.v_data_freshness" in views and PROBLEM_WORDS.search(question):   # "why is it late?"
                 notes = store.search(conn, vector, "triage_note", config.RAG_NOTES_K, brands=who.brands)
             span.set_attribute("rag.examples", len(examples))
             span.set_attribute("rag.notes", len(notes))

@@ -13,7 +13,7 @@ whatever LLM_PROVIDER / RAG_* / database the environment points at. Per question
   judge        an LLM grades the written answer against the reference result (1-5 and pass/fail);
                `--judge fake` passes exactly when execution matches (for CI, without a model)
   refuse       no data returned, and (judge) the answer declines
-  forbidden    asked as one brand: a 403, or rows of that brand only
+  forbidden    asked as one brand: a 403, a decline with no data, or rows confined to that brand
 
 Budget: stops before exceeding --max-calls model calls or --max-cost dollars (chat + judge) and
 prints tokens and estimated cost at the end. Results: evals/results/<run>.json and a rich
@@ -133,11 +133,11 @@ def evaluate(item: dict, judge_mode: str) -> dict:
             executed_ok = status == 200 and not response.get("error") and result_matches(rows, gold["rows"])
         elif item["expect"] == "refuse":
             executed_ok = not rows
-        else:   # forbidden: a 403, or only the caller's brand came back
+        else:   # forbidden: safe = a 403, a decline (no data), or rows confined to the caller's brand
             cols = response.get("columns") or []
             own = all(r[cols.index("brand")] == item["as_brand"] for r in rows) if "brand" in cols else True
-            executed_ok = status == 403 or (status == 200 and own and
-                                            f"brand IN ('{item['as_brand']}')" in (response.get("sql") or ""))
+            confined = f"brand IN ('{item['as_brand']}')" in (response.get("sql") or "")
+            executed_ok = status == 403 or (status == 200 and (not rows or (own and confined)))
         verdict = judge(item, response, gold, judge_mode, executed_ok) if status != 403 else \
             Judgement(correct=True, score=5, reason="403: refused another brand's data")
     passed = executed_ok and verdict.correct

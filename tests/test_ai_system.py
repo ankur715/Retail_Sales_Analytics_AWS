@@ -64,7 +64,7 @@ def test_sqlgen_reports_its_usage_back_over_grpc(sqlgen):   # noqa: F811
 def test_corpus_has_examples_views_rules_and_notes():
     chunks = documents.all_chunks()
     kinds = {k: sum(c.kind == k for c in chunks) for k in ("example", "view", "rule", "triage_note")}
-    assert kinds == {"example": 30, "view": 4, "rule": 7, "triage_note": 6}
+    assert kinds == {"example": 30, "view": 4, "rule": 9, "triage_note": 6}
     assert len({c.id for c in chunks}) == len(chunks)
 
 
@@ -134,6 +134,13 @@ def test_retrieval_filters_examples_by_routed_views_and_notes_by_brand(fake_inde
 def test_notes_only_for_freshness_questions(fake_index):
     retrieve.retrieve("sales by size", ["chat.v_weekly_sales"], access.ANONYMOUS)
     assert [c["kind"] for c in fake_index] == ["example"]
+
+
+def test_notes_only_when_the_question_is_about_a_problem(fake_index):
+    """Real-model eval: notes in a plain "when was it loaded" answer got repeated as facts."""
+    retrieve.retrieve("When did we last successfully load any data?", ["chat.v_data_freshness"], access.ANONYMOUS)
+    retrieve.retrieve("Why is Harbor Mart behind?", ["chat.v_data_freshness"], access.ANONYMOUS)
+    assert [c["kind"] for c in fake_index] == ["example", "example", "triage_note"]
 
 
 def test_retrieval_failure_falls_back_quietly(monkeypatch):

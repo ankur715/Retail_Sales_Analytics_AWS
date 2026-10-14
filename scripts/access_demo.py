@@ -70,13 +70,13 @@ def ask(question: str, token: str | None) -> tuple[int, str]:
 def main() -> int:
     aurora, cobalt, admin = login("aurora.analyst"), login("cobalt.analyst"), login("retail.admin")
     cases = [
-        ("no token", None, "Sales by brand for Aurora Apparel last week", 401, None),
+        ("no token", None, "Sales by brand for Aurora Apparel in the last 4 weeks", 401, None),
         ("forged token (groups edited)", forged(aurora), "Sales by brand for every brand", 401, None),
-        ("aurora.analyst", aurora, "Sales by brand for Aurora Apparel last week", 200, ["Aurora Apparel"]),
-        ("aurora.analyst", aurora, "Sales by brand for Cobalt Outdoor last week", 403, None),
-        ("aurora.analyst", aurora, "Sales by brand for every brand last week", 200, ["Aurora Apparel"]),
-        ("cobalt.analyst", cobalt, "Sales by brand for Cobalt Outdoor last week", 200, ["Cobalt Outdoor"]),
-        ("retail.admin (all-brands)", admin, "Sales by brand for every brand last week", 200,
+        ("aurora.analyst", aurora, "Sales by brand for Aurora Apparel in the last 4 weeks", 200, ["Aurora Apparel"]),
+        ("aurora.analyst", aurora, "Sales by brand for Cobalt Outdoor in the last 4 weeks", 403, None),
+        ("aurora.analyst", aurora, "Sales by brand for every brand in the last 4 weeks", 200, ["Aurora Apparel"]),
+        ("cobalt.analyst", cobalt, "Sales by brand for Cobalt Outdoor in the last 4 weeks", 200, ["Cobalt Outdoor"]),
+        ("retail.admin (all-brands)", admin, "Sales by brand for every brand in the last 4 weeks", 200,
          ["Aurora Apparel", "Bramble Footwear", "Cobalt Outdoor"]),
     ]
     table = Table(title="Per-brand access: POST /v1/chat with Keycloak tokens", title_style="bold",

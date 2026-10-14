@@ -191,7 +191,7 @@ def milestone4() -> list[str]:
         page.fill("#password", env["KC_TEST_USER_PASSWORD"])
         page.click("#kc-login")
         page.wait_for_selector("#who.on", timeout=60_000)     # back on the chat page, signed in
-        page.fill("#q", "Sales by brand for Cobalt Outdoor last week")
+        page.fill("#q", "Sales by brand for Cobalt Outdoor in the last 4 weeks")
         page.click("#send")
         page.wait_for_selector(".msg .err", timeout=60_000)
         page.wait_for_timeout(500)

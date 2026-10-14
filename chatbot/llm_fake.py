@@ -54,10 +54,10 @@ def _route(prompt: str) -> Route:
 
 
 def _by_brand(question: str) -> str:
-    """"... by brand ..." -> sales per brand last week, filtered to a brand the question names
+    """"... by brand ..." -> sales per brand over the last 4 weeks, filtered to a brand the question names
     (like a real model would). Whether that brand is visible is the SQL guard's call, not ours."""
     named = [b for b in catalog.load()["access"]["client_brands"].values() if b.lower() in question.lower()]
-    where = "weeks_ago = 0" + (f" AND brand = '{named[0]}'" if named else "")
+    where = "weeks_ago BETWEEN 0 AND 3" + (f" AND brand = '{named[0]}'" if named else "")
     return (f"SELECT brand, ROUND(SUM(sales_usd), 2) AS sales_usd FROM chat.v_sales_by_week WHERE {where} "
             "GROUP BY brand ORDER BY sales_usd DESC")
 
@@ -66,7 +66,7 @@ def _sql(prompt: str) -> SqlPlan:
     allowed = re.search(r"Use ONLY these views \(.*?\): (.+)\.\n", prompt)
     view = allowed.group(1).split(", ")[0] if allowed else catalog.view_names()[0]
     if view == "chat.v_sales_by_week" and re.search(r"\bby brand\b", _question(prompt), re.I):
-        return SqlPlan(sql=_by_brand(_question(prompt)), explanation="fake: sales per brand last week")
+        return SqlPlan(sql=_by_brand(_question(prompt)), explanation="fake: sales per brand, last 4 weeks")
     examples = catalog.load()["views"].get(view, {}).get("examples") or []
     own = [e["sql"] for e in examples if set(re.findall(r"chat\.\w+", e["sql"])) <= {view}]   # guard-safe
     sql = own[0] if own else f"SELECT * FROM {view}"

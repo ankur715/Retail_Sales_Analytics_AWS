@@ -53,6 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: docker-compose.yml renders for every profile with no secrets set (no auth variable can block `--profile app`)
+        run: |
+          docker compose --profile app --profile obs --profile load config -q
+          docker compose --profile app --profile auth config -q
       - name: deploy/k8s renders (as Argo CD builds it) and every object matches the Kubernetes 1.31 schemas
         run: |
           kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s > rendered.yaml

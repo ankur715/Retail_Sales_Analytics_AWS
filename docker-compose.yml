@@ -10,6 +10,8 @@
 # auth: Keycloak (login, realm in deploy/keycloak/) and Vault in dev mode (the chatbot's DB
 #      password). Start with  bash deploy/auth/up.sh  -- it generates the credentials into
 #      .secrets/local.env (gitignored) and turns AUTH_MODE=oidc on for the chatbot.
+#      (Their credentials default to empty, not `${VAR:?}`: Compose checks every service's
+#      variables whatever the profile, so a required one would break `--profile app` too.)
 # Passwords below are local-only defaults for throwaway containers, not real credentials.
 
 services:
@@ -107,8 +109,8 @@ services:
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?run deploy/auth/up.sh}
-      KC_TEST_USER_PASSWORD: ${KC_TEST_USER_PASSWORD:?run deploy/auth/up.sh}   # substituted into the realm import
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      KC_TEST_USER_PASSWORD: ${KC_TEST_USER_PASSWORD:-}   # substituted into the realm import
       KC_HOSTNAME: http://localhost:8081            # the issuer browsers and tokens use
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"       # ...while the chatbot fetches keys at keycloak:8080
       KC_HTTP_ENABLED: "true"
@@ -129,7 +131,7 @@ services:
     profiles: ["auth"]
     command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:?run deploy/auth/up.sh}
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:-}
     cap_add: [IPC_LOCK]
     deploy:
       resources:
@@ -140,7 +142,7 @@ services:
     profiles: ["auth"]
     entrypoint: ["/bin/sh", "/init.sh"]
     environment:
-      VAULT_DEV_ROOT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?run deploy/auth/up.sh}
+      VAULT_DEV_ROOT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:-}
       CHAT_READER_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
     volumes:
       - ./deploy/vault/init.sh:/init.sh:ro

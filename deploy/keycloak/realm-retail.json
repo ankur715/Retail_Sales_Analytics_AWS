@@ -1,0 +1,183 @@
+{
+  "realm": "retail",
+  "displayName": "Retail Sales Chatbot",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 3600,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "loginWithEmailAllowed": false,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "groups": [
+    {
+      "name": "all-brands"
+    },
+    {
+      "name": "brand-C101"
+    },
+    {
+      "name": "brand-C102"
+    },
+    {
+      "name": "brand-C103"
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "chatbot-web",
+      "name": "Retail chatbot (browser)",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8000/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "chatbot-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "chatbot-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "chatbot-test",
+      "name": "Local test scripts only (password grant)",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "chatbot-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "chatbot-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "aurora.analyst",
+      "enabled": true,
+      "firstName": "Aurora",
+      "lastName": "Test",
+      "email": "aurora.analyst@example.test",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "brand-C101"
+      ]
+    },
+    {
+      "username": "bramble.analyst",
+      "enabled": true,
+      "firstName": "Bramble",
+      "lastName": "Test",
+      "email": "bramble.analyst@example.test",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "brand-C102"
+      ]
+    },
+    {
+      "username": "cobalt.analyst",
+      "enabled": true,
+      "firstName": "Cobalt",
+      "lastName": "Test",
+      "email": "cobalt.analyst@example.test",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "brand-C103"
+      ]
+    },
+    {
+      "username": "retail.admin",
+      "enabled": true,
+      "firstName": "Retail",
+      "lastName": "Test",
+      "email": "retail.admin@example.test",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KC_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "all-brands"
+      ]
+    }
+  ]
+}

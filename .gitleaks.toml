@@ -1,0 +1,19 @@
+# gitleaks (CI job `secret-scan`, whole git history). Default rules, plus an allowlist for values
+# that are deliberately public. Each entry says why. Anything else that matches fails the build.
+title = "Retail Sales Analytics secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented local-only defaults and placeholders"
+paths = [
+  '''infra/terraform/terraform\.tfvars\.example''',   # placeholder password + RFC 5737 documentation IP
+  '''\.env\.example''',                               # blank/placeholder values (checked in milestone 4)
+]
+regexes = [
+  '''postgres-local''',       # throwaway Postgres password for local containers (docker-compose.yml, kind)
+  '''chat-reader-local''',    # throwaway chat_reader password, same
+  '''grafana-local''',        # throwaway Grafana admin password, same
+  '''local-dev-token''',      # the mock retailer API's local bearer token
+]

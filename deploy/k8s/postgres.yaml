@@ -14,9 +14,20 @@ spec:
       labels: { app: postgres }
     spec:
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: postgres
           image: postgres:16-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports: [{ containerPort: 5432, name: postgres }]
           env:
             - { name: POSTGRES_DB, value: retail_dev }
@@ -33,9 +44,15 @@ spec:
             requests: { cpu: 50m, memory: 96Mi }
             limits: { memory: 384Mi }
           volumeMounts:
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
             - { name: initdb, mountPath: /docker-entrypoint-initdb.d }
             - { name: data, mountPath: /var/lib/postgresql/data }
       volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: data
           emptyDir: {}
         - name: initdb   # scripts at the top, CSVs under data/ -- where 10_chat_views.sql COPYs from

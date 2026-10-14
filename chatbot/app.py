@@ -27,6 +27,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from chatbot import access, auth, cache, catalog, db, events, guard, idempotency, llm, telemetry
@@ -44,6 +45,26 @@ app = FastAPI(title="Retail sales analytics chatbot", version="2.0", lifespan=li
               description="Ask weekly retail sales and inventory questions in plain English. "
                           "Use the **/v1** routes; `/api/*` is kept for existing clients.")
 telemetry.setup(app)
+app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Browser hardening for the chat page and API. The CSP allows scripts only from this
+    origin (no inline script), and network calls only to this origin and Keycloak."""
+    response = await call_next(request)
+    if request.url.path in ("/docs", "/redoc"):   # Swagger UI loads its assets from a CDN
+        return response
+    login_origin = "/".join(config.OIDC_ISSUER.split("/")[:3]) if config.AUTH_MODE == "oidc" else ""
+    response.headers.update({
+        "Content-Security-Policy": f"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                   f"connect-src 'self' {login_origin}".strip() + "; frame-ancestors 'none'; "
+                                   "base-uri 'none'; form-action 'self'",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
+    })
+    return response
 v1 = APIRouter(prefix="/v1", tags=["v1"])
 legacy = APIRouter(prefix="/api", tags=["legacy (deprecated)"], deprecated=True)
 STATIC = Path(__file__).resolve().parent / "static"
@@ -114,6 +135,12 @@ def health() -> dict:
 @v1.get("/auth-config", include_in_schema=False)
 def auth_config() -> dict:
     return auth.page_config()
+
+
+@v1.get("/me")
+def me(who: access.Principal = Depends(auth.principal)) -> dict:
+    """Who the server thinks you are, and the brands you can see (null = all)."""
+    return {"username": who.username, "brands": sorted(who.brands) if who.brands is not None else None}
 
 
 IDEMPOTENCY_KEY = Header(None, alias=idempotency.HEADER,

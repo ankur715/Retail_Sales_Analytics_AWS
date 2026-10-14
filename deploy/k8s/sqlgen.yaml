@@ -21,11 +21,22 @@ spec:
       # No Docker-link env vars (SQLGEN_PORT=tcp://..., POSTGRES_PORT=...): they collide with real
       # settings -- a Service named sqlgen broke sqlgen's own SQLGEN_PORT.
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
       terminationGracePeriodSeconds: 20
       containers:
         - name: sqlgen
           image: retail-chatbot
           command: ["python", "-m", "sqlgen.server"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports:
             - { containerPort: 50051, name: grpc }
             - { containerPort: 9101, name: metrics }
@@ -40,6 +51,12 @@ spec:
           resources:
             requests: { cpu: 50m, memory: 96Mi }
             limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
 ---
 apiVersion: v1
 kind: Service

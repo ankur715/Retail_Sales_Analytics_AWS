@@ -6,7 +6,8 @@ the model swapped out. Answers are deterministic, taken from config/chat_catalog
 
   route()      the view whose keywords match the question (product/style/stock words ->
                chat.v_weekly_sales, everything else -> chat.v_sales_by_week)
-  write_sql()  the first catalog example that uses only the allowed view, so it passes the guard
+  write_sql()  "... by brand ..." -> sales per brand (filtered to a brand the question names);
+               otherwise the first catalog example that uses only the allowed view
   summarize()  a one-line answer quoting the row count
 
   FAKE_LLM_LATENCY_MS   mean delay per call (exponentially distributed, like a real
@@ -52,9 +53,20 @@ def _route(prompt: str) -> Route:
     return Route(views=[view], reason="fake: keyword match")
 
 
+def _by_brand(question: str) -> str:
+    """"... by brand ..." -> sales per brand last week, filtered to a brand the question names
+    (like a real model would). Whether that brand is visible is the SQL guard's call, not ours."""
+    named = [b for b in catalog.load()["access"]["client_brands"].values() if b.lower() in question.lower()]
+    where = "weeks_ago = 0" + (f" AND brand = '{named[0]}'" if named else "")
+    return (f"SELECT brand, ROUND(SUM(sales_usd), 2) AS sales_usd FROM chat.v_sales_by_week WHERE {where} "
+            "GROUP BY brand ORDER BY sales_usd DESC")
+
+
 def _sql(prompt: str) -> SqlPlan:
     allowed = re.search(r"Use ONLY these views \(.*?\): (.+)\.\n", prompt)
     view = allowed.group(1).split(", ")[0] if allowed else catalog.view_names()[0]
+    if view == "chat.v_sales_by_week" and re.search(r"\bby brand\b", _question(prompt), re.I):
+        return SqlPlan(sql=_by_brand(_question(prompt)), explanation="fake: sales per brand last week")
     examples = catalog.load()["views"].get(view, {}).get("examples") or []
     own = [e["sql"] for e in examples if set(re.findall(r"chat\.\w+", e["sql"])) <= {view}]   # guard-safe
     sql = own[0] if own else f"SELECT * FROM {view}"

@@ -198,3 +198,73 @@ def test_idempotency_keys_are_per_user(pipeline, oidc, monkeypatch):   # noqa: F
     other = ask(client, bearer=token(groups=["brand-C103"], sub="u-cobalt"), key="shared-key")
     assert other.status_code == 200 and "Idempotent-Replayed" not in other.headers
     assert pipeline["write_sql"] == 2
+
+
+# ---------------------------------------------------------------------------
+# the page and its headers
+# ---------------------------------------------------------------------------
+def test_me_reports_the_verified_brands(oidc):
+    r = TestClient(chat_app.app).get("/v1/me", headers={"Authorization": f"Bearer {token()}"})
+    assert r.json() == {"username": "u-aurora", "brands": ["Aurora Apparel"]}
+    assert TestClient(chat_app.app).get("/v1/me").status_code == 401
+
+
+def test_page_is_served_with_a_strict_csp(oidc):
+    client = TestClient(chat_app.app)
+    page = client.get("/")
+    csp = page.headers["Content-Security-Policy"]
+    assert "script-src 'self'" in csp and "unsafe-inline" not in csp.split("script-src")[1].split(";")[0]
+    assert "connect-src 'self' http://localhost:8081" in csp and page.headers["X-Frame-Options"] == "DENY"
+    assert "<script>" not in page.text and client.get("/static/app.js").status_code == 200
+
+
+
+# ---------------------------------------------------------------------------
+# secrets: Vault first, then the environment
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def vault(monkeypatch, tmp_path):
+    from etl import secrets
+    token_file = tmp_path / "token"
+    token_file.write_text("s.chatbot-read-only\n")
+    monkeypatch.setenv("VAULT_ADDR", "http://vault:8200")
+    monkeypatch.setenv("VAULT_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("VAULT_SECRET_PATH", "secret/retail/chatbot")
+    secrets._vault_values.cache_clear()
+    yield secrets
+    secrets._vault_values.cache_clear()
+
+
+def test_vault_value_wins_and_the_token_comes_from_the_file(vault, monkeypatch):
+    calls = []
+
+    def get(url, headers, timeout):
+        calls.append((url, headers))
+        return SimpleNamespace(raise_for_status=lambda: None,
+                               json=lambda: {"data": {"data": {"CHAT_REDSHIFT_PASSWORD": "from-vault"}}})
+
+    monkeypatch.setattr(vault.requests, "get", get)
+    monkeypatch.setenv("CHAT_REDSHIFT_PASSWORD", "from-env")
+    assert vault.get("CHAT_REDSHIFT_PASSWORD") == "from-vault"
+    assert vault.get("NOT_SET_ANYWHERE", "dflt") == "dflt"                   # not in Vault or the env
+    assert calls == [("http://vault:8200/v1/secret/data/retail/chatbot",
+                      {"X-Vault-Token": "s.chatbot-read-only"})]               # read once, KV v2 path
+
+
+def test_unreachable_vault_falls_back_to_the_environment(vault, monkeypatch, caplog):
+    def down(*a, **k):
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(vault.requests, "get", down)
+    monkeypatch.setenv("CHAT_REDSHIFT_PASSWORD", "from-env")
+    assert vault.get("CHAT_REDSHIFT_PASSWORD") == "from-env"
+    assert "s.chatbot-read-only" not in caplog.text                          # the token is never logged
+
+
+def test_without_vault_it_is_the_environment(monkeypatch):
+    from etl import secrets
+    monkeypatch.delenv("VAULT_ADDR", raising=False)
+    secrets._vault_values.cache_clear()
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    assert secrets.get("SMTP_PASSWORD") == "app-password"
+    secrets._vault_values.cache_clear()

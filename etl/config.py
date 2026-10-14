@@ -13,6 +13,8 @@ import os
 
 from dotenv import load_dotenv
 
+from etl import secrets   # Vault first, then the environment (milestone 4)
+
 # Load the project's .env (one folder up from etl/) no matter where the
 # script is launched from. Real environment variables win over .env, so
 # Airflow/CI can override anything.
@@ -35,12 +37,12 @@ REDSHIFT_PORT = int(os.environ.get("REDSHIFT_PORT", "5439"))
 REDSHIFT_SSLMODE = os.environ.get("REDSHIFT_SSLMODE", "require")   # disable only for the local Postgres copy
 REDSHIFT_DB = os.environ.get("REDSHIFT_DB", f"retail_{ENV}")   # retail_dev / retail_prod
 REDSHIFT_USER = os.environ.get("REDSHIFT_USER", "admin")
-REDSHIFT_PASSWORD = os.environ.get("REDSHIFT_PASSWORD", "")
+REDSHIFT_PASSWORD = secrets.get("REDSHIFT_PASSWORD", "")
 REDSHIFT_IAM_ROLE_ARN = os.environ.get("REDSHIFT_IAM_ROLE_ARN", "")   # role Redshift assumes to COPY
 
 # --- Mock retailer API (mock_api/) ---
 RETAILER_API_URL = os.environ.get("RETAILER_API_URL", "http://localhost:9100")
-RETAILER_API_TOKEN = os.environ.get("RETAILER_API_TOKEN", "local-dev-token")
+RETAILER_API_TOKEN = secrets.get("RETAILER_API_TOKEN", "local-dev-token")
 
 # --- LLM features: the analytics chatbot (chatbot/) and the triage agent (triage/) ---
 # none (the default) turns every LLM feature off, so CI, tests and a fresh clone never
@@ -50,12 +52,12 @@ RETAILER_API_TOKEN = os.environ.get("RETAILER_API_TOKEN", "local-dev-token")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "none").strip().lower()   # none | gemini | bedrock | fake
 BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL", "claude-opus-5-5")       # or a full id / inference profile
 LLM_BEDROCK_ENDPOINT = os.environ.get("LLM_BEDROCK_ENDPOINT", "mantle").strip().lower()   # mantle | runtime
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GOOGLE_API_KEY = secrets.get("GOOGLE_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 FAKE_LLM_LATENCY_MS = float(os.environ.get("FAKE_LLM_LATENCY_MS", "0"))   # mean delay per fake call
 FAKE_LLM_ERROR_RATE = float(os.environ.get("FAKE_LLM_ERROR_RATE", "0"))   # 0..1, share raising "busy"
 CHAT_REDSHIFT_USER = os.environ.get("CHAT_REDSHIFT_USER", "chat_reader")
-CHAT_REDSHIFT_PASSWORD = os.environ.get("CHAT_REDSHIFT_PASSWORD", "")
+CHAT_REDSHIFT_PASSWORD = secrets.get("CHAT_REDSHIFT_PASSWORD", "")
 # A person is waiting: the chatbot gives up on a down database fast (the ETL keeps the patient
 # 4-attempt default). 10 s still covers a paused Redshift Serverless waking up.
 CHAT_DB_CONNECT_TIMEOUT_S = int(os.environ.get("CHAT_DB_CONNECT_TIMEOUT_S", "10"))
@@ -87,7 +89,7 @@ TRIAGE_MODEL = os.environ.get("TRIAGE_MODEL", "nova-lite").strip()
 TRIAGE_MAX_STEPS = int(os.environ.get("TRIAGE_MAX_STEPS", "8"))          # model calls per run
 TRIAGE_MAX_TOKENS = int(os.environ.get("TRIAGE_MAX_TOKENS", "40000"))    # input + output, whole run
 TRIAGE_REDSHIFT_USER = os.environ.get("TRIAGE_REDSHIFT_USER", "triage_reader")   # read-only user
-TRIAGE_REDSHIFT_PASSWORD = os.environ.get("TRIAGE_REDSHIFT_PASSWORD", "")
+TRIAGE_REDSHIFT_PASSWORD = secrets.get("TRIAGE_REDSHIFT_PASSWORD", "")
 
 # --- Failure email (etl/alerts.py): one email per final task failure, with the triage note ---
 # Off unless SMTP_USER, SMTP_PASSWORD and ALERT_EMAIL are all set (CI and tests leave them empty).
@@ -95,7 +97,7 @@ TRIAGE_REDSHIFT_PASSWORD = os.environ.get("TRIAGE_REDSHIFT_PASSWORD", "")
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))           # STARTTLS
 SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_PASSWORD = secrets.get("SMTP_PASSWORD", "")
 ALERT_EMAIL = os.environ.get("ALERT_EMAIL", "")               # recipient(s), comma-separated
 ALERT_FROM = os.environ.get("ALERT_FROM", "") or SMTP_USER
 

@@ -214,7 +214,8 @@ def main(argv=None) -> int:
     record.print(scorecard(results, meta))
     SCORECARD.parent.mkdir(parents=True, exist_ok=True)
     record.save_svg(str(SCORECARD), title="chatbot eval")
-    console.print(f"\nresults: {out.relative_to(ROOT)}\nmodel calls: {spent.llm_calls}, tokens: "
+    shown = out.relative_to(ROOT) if out.is_relative_to(ROOT) else out
+    console.print(f"\nresults: {shown}\nmodel calls: {spent.llm_calls}, tokens: "
                   f"{spent.input_tokens:,} in / {spent.output_tokens:,} out, estimated cost: ${spent.cost_usd:.4f}")
     return 0
 

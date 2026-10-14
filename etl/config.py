@@ -67,6 +67,15 @@ REDIS_URL = os.environ.get("REDIS_URL", "")
 SQLGEN_ADDR = os.environ.get("SQLGEN_ADDR", "")
 SQLGEN_TIMEOUT_S = float(os.environ.get("SQLGEN_TIMEOUT_S", "60"))
 
+# --- Login (milestone 4): Keycloak OIDC. off = no login, every brand visible (tests, CI, the
+# laptop, load and chaos tests); oidc = POST /v1/chat needs a Keycloak access token, and the
+# token's groups decide which brands the caller sees (chatbot/auth.py, chatbot/access.py).
+AUTH_MODE = os.environ.get("AUTH_MODE", "off").strip().lower()
+OIDC_ISSUER = os.environ.get("OIDC_ISSUER", "")          # as the browser sees it, e.g. http://localhost:8081/realms/retail
+OIDC_JWKS_URL = os.environ.get("OIDC_JWKS_URL", "")      # signing keys, as the server reaches them (default: issuer's)
+OIDC_AUDIENCE = os.environ.get("OIDC_AUDIENCE", "chatbot-api")
+OIDC_WEB_CLIENT_ID = os.environ.get("OIDC_WEB_CLIENT_ID", "chatbot-web")   # the chat page's public client (PKCE)
+
 # --- Events (milestone 3): a load_completed message per successful load, on Redpanda (Kafka API) ---
 # Unset = no events (CI, tests, the laptop); the chatbot then falls back to its 60 s version check.
 EVENTS_BOOTSTRAP = os.environ.get("EVENTS_BOOTSTRAP", "")          # e.g. redpanda:9092

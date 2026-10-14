@@ -6,6 +6,16 @@
 # known values and examples to write the SQL. The SQL validator then allows
 # exactly those views -- a question can't reach anything it wasn't routed to.
 
+# Who may see which brand (milestone 4). A signed-in user's token carries groups like
+# brand-C101; the chatbot maps them to brand names here, and the SQL guard confines every
+# view that has a `brand` column to those brands (chatbot/access.py). Group all-brands sees all.
+access:
+  brand_column: brand
+  client_brands:
+    C101: Aurora Apparel
+    C102: Bramble Footwear
+    C103: Cobalt Outdoor
+
 business_rules:
   - "Weeks end on Saturday. week_ending is the Saturday that closes the week."
   - "weeks_ago = 0 is the LATEST week loaded (not today). 'Last week' means weeks_ago = 0; 'last 4 weeks' means weeks_ago BETWEEN 0 AND 3; 'the 4 weeks before that' means weeks_ago BETWEEN 4 AND 7."

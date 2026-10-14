@@ -6,6 +6,9 @@ not be rejected for containing "update"). Accepted only if it is:
   - reading only the views this question was routed to (chat.* allowlist);
     CTE names defined in the query itself are allowed
   - row-capped: a missing or larger LIMIT becomes MAX_ROWS
+  - confined to the caller's brands (milestone 4): every view with a brand column is
+    replaced by a subquery filtered to those brands, and SQL that names another brand is
+    refused (access.Forbidden -> 403). This doesn't depend on what the model wrote.
 
 The database user is read-only on the chat schema anyway; this is the
 second line of defence and gives Gemini a precise error to fix.
@@ -13,6 +16,8 @@ second line of defence and gives Gemini a precise error to fix.
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
+
+from chatbot import access
 
 MAX_ROWS = 500
 WRITE_NODES = (exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop, exp.Alter,
@@ -23,8 +28,9 @@ class UnsafeSQL(ValueError):
     pass
 
 
-def validate(sql: str, allowed_views: list[str]) -> str:
-    """Return the cleaned, row-capped SQL, or raise UnsafeSQL with the reason."""
+def validate(sql: str, allowed_views: list[str], brands: frozenset[str] | None = None) -> str:
+    """Return the cleaned, row-capped (and, with `brands`, brand-confined) SQL, or raise
+    UnsafeSQL with the reason / access.Forbidden for another brand's data."""
     sql = sql.strip().strip("`").removeprefix("sql").strip().rstrip(";")
     try:
         statements = [s for s in sqlglot.parse(sql, read="redshift") if s is not None]
@@ -52,4 +58,26 @@ def validate(sql: str, allowed_views: list[str]) -> str:
     current = limit.expression if limit else None
     if current is None or not (current.is_int and int(current.name) <= MAX_ROWS):
         tree.set("limit", exp.Limit(expression=exp.Literal.number(MAX_ROWS)))
+    if brands is not None:
+        _confine(tree, brands)
     return tree.sql(dialect="redshift")
+
+
+def _confine(tree: exp.Expression, brands: frozenset[str]) -> None:
+    # 1. A clear refusal when the query names a brand the caller can't see
+    known = {b.lower(): b for b in access.client_brands().values()}
+    for literal in tree.find_all(exp.Literal):
+        if literal.is_string:
+            brand = known.get(literal.name.strip().lower())
+            if brand and brand not in brands:
+                raise access.Forbidden(f"You don't have access to {brand}'s data")
+    # 2. The enforcement: each brand view -> (SELECT * FROM view WHERE brand IN (...)) AS same name
+    col, confined = access.brand_column(), access.brand_views()
+    allowed = [exp.Literal.string(b) for b in sorted(brands)] or [exp.Null()]   # no brands: no rows
+    for table in list(tree.find_all(exp.Table)):
+        name = f"{table.db}.{table.name}".lower()
+        if not table.db or name not in confined:
+            continue
+        inner = exp.select("*").from_(exp.Table(this=exp.to_identifier(table.name), db=exp.to_identifier(table.db)))
+        inner = inner.where(exp.In(this=exp.column(col), expressions=allowed))
+        table.replace(exp.Subquery(this=inner, alias=exp.TableAlias(this=exp.to_identifier(table.alias_or_name))))

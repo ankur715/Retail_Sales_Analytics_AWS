@@ -14,8 +14,6 @@ import logging
 import os
 from functools import lru_cache
 
-import requests
-
 log = logging.getLogger(__name__)
 
 
@@ -28,6 +26,7 @@ def _vault_values() -> dict:
     token = open(token_file).read().strip() if token_file and os.path.exists(token_file) else \
         os.environ.get("VAULT_TOKEN", "")
     mount, _, path = os.environ.get("VAULT_SECRET_PATH", "secret/retail/app").partition("/")
+    import requests   # only when Vault is in use: etl.config stays importable with no extra packages
     try:
         r = requests.get(f"{addr}/v1/{mount}/data/{path}", headers={"X-Vault-Token": token}, timeout=5)
         r.raise_for_status()

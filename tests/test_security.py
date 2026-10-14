@@ -243,7 +243,7 @@ def test_vault_value_wins_and_the_token_comes_from_the_file(vault, monkeypatch):
         return SimpleNamespace(raise_for_status=lambda: None,
                                json=lambda: {"data": {"data": {"CHAT_REDSHIFT_PASSWORD": "from-vault"}}})
 
-    monkeypatch.setattr(vault.requests, "get", get)
+    monkeypatch.setattr("requests.get", get)
     monkeypatch.setenv("CHAT_REDSHIFT_PASSWORD", "from-env")
     assert vault.get("CHAT_REDSHIFT_PASSWORD") == "from-vault"
     assert vault.get("NOT_SET_ANYWHERE", "dflt") == "dflt"                   # not in Vault or the env
@@ -255,7 +255,7 @@ def test_unreachable_vault_falls_back_to_the_environment(vault, monkeypatch, cap
     def down(*a, **k):
         raise ConnectionError("refused")
 
-    monkeypatch.setattr(vault.requests, "get", down)
+    monkeypatch.setattr("requests.get", down)
     monkeypatch.setenv("CHAT_REDSHIFT_PASSWORD", "from-env")
     assert vault.get("CHAT_REDSHIFT_PASSWORD") == "from-env"
     assert "s.chatbot-read-only" not in caplog.text                          # the token is never logged

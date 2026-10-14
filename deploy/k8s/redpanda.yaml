@@ -33,6 +33,10 @@ spec:
             - --overprovisioned
             - --kafka-addr=PLAINTEXT://0.0.0.0:9092
             - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+            # /etc/redpanda is an empty writable dir (read-only root filesystem), so the image's
+            # default config -- which set these -- is gone: give the RPC listener explicitly
+            - --rpc-addr=0.0.0.0:33145
+            - --advertise-rpc-addr=redpanda:33145
           # (dev-container mode already enables topic auto-creation; `rpk redpanda start` has no --set)
           securityContext:
             allowPrivilegeEscalation: false

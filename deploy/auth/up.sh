@@ -20,6 +20,7 @@ CHAT_READER_PASSWORD=$(gen)
 ENV
   echo "generated .secrets/local.env"
 fi
+chmod 600 .secrets/local.env   # explicit: the workspace's default ACLs can override umask
 # Login on; the DB password comes from Vault, so the chatbot's env has none
 export AUTH_MODE=oidc VAULT_ADDR=http://vault:8200 CHAT_REDSHIFT_PASSWORD_ENV=
 docker compose --env-file .secrets/local.env --profile app --profile auth up -d --build \
@@ -29,5 +30,5 @@ for _ in $(seq 1 60); do
   curl -sf localhost:8000/v1/health >/dev/null && curl -sf localhost:8081/realms/retail >/dev/null && break
   sleep 3
 done
-docker compose --profile app --profile auth ps --format 'table {{.Service}}\t{{.Status}}'
+docker compose --env-file .secrets/local.env --profile app --profile auth ps --format 'table {{.Service}}\t{{.Status}}'
 echo "users: aurora.analyst, bramble.analyst, cobalt.analyst, retail.admin (password: KC_TEST_USER_PASSWORD in .secrets/local.env)"

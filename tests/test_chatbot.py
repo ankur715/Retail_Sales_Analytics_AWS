@@ -90,7 +90,7 @@ def fakes(monkeypatch):
     calls = {"write_sql": [], "query": []}
     monkeypatch.setattr(chat_app.config, "GOOGLE_API_KEY", "test-key")
     monkeypatch.setattr(llm, "route", lambda q: llm.Route(views=["chat.v_sales_by_week"], reason="totals"))
-    monkeypatch.setattr(llm, "summarize", lambda q, sql, cols, rows, as_of: f"{len(rows)} rows through {as_of}")
+    monkeypatch.setattr(llm, "summarize", lambda q, sql, cols, rows, as_of, **kw: f"{len(rows)} rows through {as_of}")
     monkeypatch.setattr(chat_app.db, "known_values", lambda cols: {"chat.v_sales_by_week.retailer": ["Harbor Mart"]})
     monkeypatch.setattr(chat_app.db, "data_as_of", lambda: "2026-10-17")
     monkeypatch.setattr(chat_app.db, "data_version", lambda: "2026-10-18 06:00:00")

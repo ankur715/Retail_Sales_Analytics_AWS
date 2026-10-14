@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir --upgrade pip "setuptools>=80" "wheel>=0.46.2" \
  && pip install --no-cache-dir -r requirements.txt
 COPY chatbot/ chatbot/
 COPY sqlgen/ sqlgen/
+COPY rag/ rag/
 COPY etl/ etl/
 COPY config/ config/
 USER 10001

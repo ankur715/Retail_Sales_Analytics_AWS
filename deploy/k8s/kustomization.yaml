@@ -28,6 +28,7 @@ configMapGenerator:
     files:
       - ../../docker/postgres/initdb/00_roles.sh
       - ../../docker/postgres/initdb/10_chat_views.sql
+      - ../../docker/postgres/initdb/20_rag.sql
   - name: postgres-seed
     files:
       - ../../docker/postgres/initdb/data/v_calendar.csv
@@ -48,6 +49,7 @@ configMapGenerator:
     files:
       - ../../observability/grafana/dashboards/golden_signals.json
       - ../../observability/grafana/dashboards/slo.json
+      - ../../observability/grafana/dashboards/llm_cost.json
 secretGenerator:
   # Local-only defaults for throwaway pods, the same ones docker-compose.yml uses -- not real
   # credentials. Real secrets come out of git entirely in milestone 4 (Vault / Codespaces secrets).

@@ -54,6 +54,8 @@ BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL", "claude-opus-5-5")       # or a 
 LLM_BEDROCK_ENDPOINT = os.environ.get("LLM_BEDROCK_ENDPOINT", "mantle").strip().lower()   # mantle | runtime
 GOOGLE_API_KEY = secrets.get("GOOGLE_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")                      # self-hosted model (optional)
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:1.5b")
 FAKE_LLM_LATENCY_MS = float(os.environ.get("FAKE_LLM_LATENCY_MS", "0"))   # mean delay per fake call
 FAKE_LLM_ERROR_RATE = float(os.environ.get("FAKE_LLM_ERROR_RATE", "0"))   # 0..1, share raising "busy"
 CHAT_REDSHIFT_USER = os.environ.get("CHAT_REDSHIFT_USER", "chat_reader")
@@ -77,6 +79,15 @@ OIDC_ISSUER = os.environ.get("OIDC_ISSUER", "")          # as the browser sees i
 OIDC_JWKS_URL = os.environ.get("OIDC_JWKS_URL", "")      # signing keys, as the server reaches them (default: issuer's)
 OIDC_AUDIENCE = os.environ.get("OIDC_AUDIENCE", "chatbot-api")
 OIDC_WEB_CLIENT_ID = os.environ.get("OIDC_WEB_CLIENT_ID", "chatbot-web")   # the chat page's public client (PKCE)
+
+# --- Retrieval (milestone 5): pgvector index of example SQL, view docs and triage notes (rag/).
+# Off = the catalog's own examples go in the prompt, as before. The index lives in Postgres
+# (the Codespace copy; Neon/Supabase in production) -- Redshift has no vector type.
+RAG_ENABLED = os.environ.get("RAG_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+RAG_DATABASE_URL = secrets.get("RAG_DATABASE_URL", "")     # read-only user
+RAG_EMBEDDER = os.environ.get("RAG_EMBEDDER", "hash")       # hash | fastembed (must match the index)
+RAG_EXAMPLES_K = int(os.environ.get("RAG_EXAMPLES_K", "4"))
+RAG_NOTES_K = int(os.environ.get("RAG_NOTES_K", "2"))
 
 # --- Events (milestone 3): a load_completed message per successful load, on Redpanda (Kafka API) ---
 # Unset = no events (CI, tests, the laptop); the chatbot then falls back to its 60 s version check.

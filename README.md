@@ -34,6 +34,7 @@ to approve. See [Pipeline Triage Agent](#pipeline-triage-agent).
 | **Analytics chatbot** | Plain-English question → SQL on curated views (read-only user, validated SQL) → answer with its data | FastAPI, Claude on Bedrock or Gemini |
 | **Pipeline Triage Agent** | When a load fails, investigates with read-only tools and writes a diagnosis and a fix for a person to approve | Bedrock Converse tool use, Nova Lite (Claude Haiku 4.5 optional) |
 | **Observability** | A trace span per chatbot step, a golden-signals dashboard and a k6 load test at 1x and 10x: the three LLM calls are 99% of latency, the database about 1% | OpenTelemetry, Jaeger, Prometheus, Grafana, k6, Docker Compose in a Codespace |
+| **AI system** | Retrieval (pgvector) picks the most relevant solved examples and pipeline notes per question; every response reports its tokens and cost; 46 prompt-injection attacks all held; a 50-question eval scores 86% on Claude Haiku 4.5 at ~$0.004 a question | pgvector, fastembed, Bedrock, LLM-as-judge, Grafana |
 | **Security and compliance** | Keycloak login; each brand sees only its own data, enforced in the SQL guard (not the model), so another brand's data is a 403; secrets from Vault; gitleaks, bandit and Trivy gate every PR; non-root, read-only containers; a STRIDE threat model and an AI-governance note | Keycloak (OIDC + PKCE), Vault, gitleaks, bandit, Trivy |
 | **Production operations** | Deployed to Kubernetes (kind) by Argo CD from git; a `load_completed` event on Redpanda retires cached answers in under a second; SLOs with burn-rate alerts; chaos tests (Postgres, sqlgen, Redis killed, 50% model errors) pass with zero 500s, serving stale answers instead of errors | Kubernetes, Argo CD, Redpanda, Prometheus rules, Grafana |
 | **Services and data tier** | Versioned `/v1` API; answer cache in Redis, retired by each new load (a hit takes 3 ms vs 2.2 s for a miss); safe retries with `Idempotency-Key`; SQL generation as a gRPC service; a CI check that blocks risky migrations | FastAPI, Redis, gRPC + protobuf, GitHub Actions |
@@ -914,6 +915,76 @@ Then open the forwarded port 8000 and sign in as `aurora.analyst`, `cobalt.analy
 `retail.admin` (password: `KC_TEST_USER_PASSWORD` in `.secrets/local.env`). What went wrong
 along the way: [docs/m4-what-broke.md](docs/m4-what-broke.md).
 
+## AI system: retrieval, cost, injection tests and evaluation
+
+Milestone 5 turns "the chatbot works" into numbers: how often it's right, what each question
+costs, and whether a manipulated model can get past the guard.
+
+- **Cost and latency per request.** Every model call reports its tokens, priced from a reviewed
+  `config/llm_prices.yaml`. Each response carries its own `usage` (calls, tokens, dollars), and
+  a Grafana dashboard shows cost per question, spend by step, and latency. SQL generation runs
+  in the sqlgen service, so its gRPC reply sends its usage back.
+- **Retrieval with pgvector.** The index holds 30 solved example questions with SQL, the view
+  docs, the business rules and past triage-agent notes. Per question, the model is shown the 4
+  most similar examples that use only the routed views, instead of a fixed set. For problem
+  questions ("why is Harbor Mart late?") it also gets the nearest triage notes, filtered to the
+  caller's brands. If retrieval fails, the old behaviour takes over.
+- **A prompt-injection suite that assumes the attacker wins.** It plays a fully compromised
+  model writing hostile SQL. Writing it found a real gap: the guard didn't check functions
+  (`pg_read_file`, `pg_sleep`, `current_user`). Now **46 of 46 attacks are refused, confined to
+  the caller's brand, or answered with a 403.**
+- **A 50-question evaluation** across nine categories, with reference SQL. It scores routing,
+  execution accuracy (does the result match the reference's) and an LLM judge of the written
+  answer, with a hard budget cap and the tokens and cost printed at the end.
+- **A self-hosted option.** An Ollama provider for a local model (implemented and tested, not
+  yet run), next to Bedrock, Gemini and the fake model.
+
+Decisions, results and limits: [ADR 0005](docs/adr/0005-ai-system.md).
+
+<img src="pics/ai_eval_scorecard.jpg" alt="Eval scorecard for 50 questions on Claude Haiku 4.5: by category, routing 88-100%, result matches 75-100%, judge pass 75-100%; overall 98% routed, 88% result matches, 86% judge pass, 86% PASS, median latency 4.7 s, total cost $0.192 for 182 model calls" width="900">
+
+*50 questions on Claude Haiku 4.5, judged by the same model against reference results: 86%
+pass, $0.19 for the whole run. Calendar, refusals and cross-brand attempts are 100%. Most
+misses are "latest week" meaning the pair's own latest, not the global one.*
+
+<img src="pics/ai_prompt_injection_suite.jpg" alt="Prompt-injection suite table: extra statements 2 of 2 refused, writes and server commands 10 of 10, other tables and catalogs 9 of 9, smuggled inside a valid query 6 of 6, dangerous or revealing functions 11 of 11, another brand's rows 5 confined and 3 answered with 403; total 46 of 46 held" width="900">
+
+*Every attack a hijacked model might write, run through the guard as Aurora's analyst. The
+guard, not the model, is the boundary.*
+
+<img src="pics/ai_cost_latency_per_request.jpg" alt="Grafana cost dashboard during a 10x load test: median cost per answered question $0.0015, spend rate $46.50 per hour, about 1,000 tokens per question, p95 latency 6.2 s; write_sql is the most expensive step" width="900">
+
+*A 10x load test with every question a cache miss, priced at Haiku 4.5 rates: $0.0015 a
+question, but $46 an hour at this volume, which is why the cache matters. `write_sql` costs
+most: its prompt carries view metadata and retrieved examples.*
+
+**What the eval taught us.**
+- The first run scored 78%. Three of its failures were my scoring rule, not the model: Haiku
+  safely *declined* cross-brand questions, which the rule didn't count as safe.
+- Retrieval had made two freshness answers worse: Haiku repeated unrelated triage notes as
+  facts. Notes now only come with problem questions.
+- Two business rules added for the remaining misses didn't fix them. They're recorded as next
+  steps, to be judged on a held-out question set rather than tuned on these 50.
+
+Details: [ADR 0005](docs/adr/0005-ai-system.md).
+
+### Run it
+
+```bash
+# Codespace: Postgres + pgvector, then build the index
+docker compose --profile app up -d postgres
+.venv/bin/python -m rag.ingest --embedder hash --dsn postgresql://postgres:postgres-local@localhost:5432/retail_dev
+#   (or --embedder fastembed after: .venv/bin/pip install -r requirements-rag.txt)
+.venv/bin/python -m scripts.injection_report                  # the injection table, no model needed
+.venv/bin/python -m evals.run --judge fake --only tot-01      # harness smoke test with the fake model
+.venv/bin/python -m evals.run --max-calls 260 --max-cost 2    # the real eval: LLM_PROVIDER=bedrock, ~$0.19
+```
+
+The scored runs went from the laptop, using its AWS profile, against the Codespace's Postgres
+through `gh codespace ports forward 5432:5432`: one small Python process, no model on the
+laptop. Results are in `evals/results/`. What went wrong:
+[docs/m5-what-broke.md](docs/m5-what-broke.md).
+
 ## Dummy data
 
 3 clients (Aurora Apparel, Bramble Footwear, Cobalt Outdoor) × 3 retailers.
@@ -999,14 +1070,17 @@ To run one pipeline from the CLI without Airflow (same steps as its DAG):
 ## Tests
 
 ```bash
-.venv/bin/pytest -q tests                  # 234 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, security (forged/expired/wrong-audience/algorithm-swap tokens, SQL confinement across joins, CTEs, subqueries and unions, 403s, per-caller cache and idempotency, CSP, Vault-then-env secrets), operations (load_completed publish/consume, DB-outage classification, stale fallback, gRPC retries and reconnect settings), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
+.venv/bin/pytest -q tests                  # 319 unit tests (+77 integration tests against real Postgres in CI): parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, AI system (token/cost accounting across processes, retrieval filters and fallback, Ollama adapter, eval scoring), prompt injection (46 attacks against the guard, a compromised model end to end), security (forged/expired/wrong-audience/algorithm-swap tokens, SQL confinement across joins, CTEs, subqueries and unions, 403s, per-caller cache and idempotency, CSP, Vault-then-env secrets), operations (load_completed publish/consume, DB-outage classification, stale fallback, gRPC retries and reconnect settings), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
 cd airflow && ../.venv/bin/pytest -q tests # 15 DAG tests: one DAG per pipeline, subflow shape, reconcile gates the merge, every Redshift writer pooled, priority order, failure path (FAILED, then triage, then email; none can raise)
 ```
 
 CI (`.github/workflows/ci.yml`) runs both suites, checks the gRPC stubs match
 `sqlgen.proto`, runs the migration-safety check, unit-tests the SLO alert rules
 with promtool, renders the Kubernetes manifests and validates them against the
-Kubernetes 1.31 schemas, scans for secrets (gitleaks, all history), Python
+Kubernetes 1.31 schemas, renders the Compose file for every profile without
+secrets, runs the integration tests against a real pgvector Postgres seeded with
+the chat views (every example and eval reference query, retrieval with access
+filters, an eval smoke run), scans for secrets (gitleaks, all history), Python
 security issues (bandit) and misconfigurations and image CVEs (Trivy), and runs
 `terraform fmt` and `terraform validate`, on every push to `dev`/`main` and on
 every PR.
@@ -1065,6 +1139,9 @@ only while it runs. Delete the cluster when done. Nothing in it touches AWS.
 Milestone 4's Keycloak and Vault run there too, at no AWS cost. The S3 bucket
 deliberately stays on SSE-S3 rather than a customer-managed KMS key (about $1 a
 month plus requests), because it holds only synthetic data. Revisit before any real data.
+Milestone 5's evaluation is the one place real model calls are budgeted: 50 questions
+on Claude Haiku 4.5 cost $0.19 (182 calls), with a hard cap in the runner. A live
+question costs about $0.0015 at Haiku rates; the cache makes repeats free.
 The one AWS step, exporting the `chat.*` views
 (about 2,000 rows), is a single short Redshift session, about $0.05.
 
@@ -1091,6 +1168,9 @@ observability/                 OTel Collector, Prometheus and Grafana config; go
 deploy/k8s/                    Kubernetes manifests (Kustomize), synced by Argo CD
 deploy/argocd/, deploy/kind/   Argo CD Application and settings; kind cluster + up.sh / forward.sh
 chaos/                         chaos tests: run.py (experiments) and traffic.py (in-cluster traffic)
+rag/                           retrieval: documents, embedders (hash / fastembed), pgvector store, ingest, per-question retrieve
+evals/                         50-question eval set, the runner (routing, execution accuracy, LLM judge, budget cap), results
+config/sql_examples.yaml, config/llm_prices.yaml   retrieval example bank; LLM prices for cost per request
 deploy/keycloak/, deploy/vault/, deploy/auth/   Keycloak realm (as code), Vault seeding, auth stack bring-up
 .gitleaks.toml, .trivyignore   security-scan allowlist and accepted findings (with reasons and expiry)
 loadtest/chat.js               k6 load test (1x / 10x; CACHE=on for cache hits and idempotent retries)

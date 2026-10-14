@@ -34,6 +34,7 @@ to approve. See [Pipeline Triage Agent](#pipeline-triage-agent).
 | **Analytics chatbot** | Plain-English question → SQL on curated views (read-only user, validated SQL) → answer with its data | FastAPI, Claude on Bedrock or Gemini |
 | **Pipeline Triage Agent** | When a load fails, investigates with read-only tools and writes a diagnosis and a fix for a person to approve | Bedrock Converse tool use, Nova Lite (Claude Haiku 4.5 optional) |
 | **Observability** | A trace span per chatbot step, a golden-signals dashboard and a k6 load test at 1x and 10x: the three LLM calls are 99% of latency, the database about 1% | OpenTelemetry, Jaeger, Prometheus, Grafana, k6, Docker Compose in a Codespace |
+| **Security and compliance** | Keycloak login; each brand sees only its own data, enforced in the SQL guard (not the model), so another brand's data is a 403; secrets from Vault; gitleaks, bandit and Trivy gate every PR; non-root, read-only containers; a STRIDE threat model and an AI-governance note | Keycloak (OIDC + PKCE), Vault, gitleaks, bandit, Trivy |
 | **Production operations** | Deployed to Kubernetes (kind) by Argo CD from git; a `load_completed` event on Redpanda retires cached answers in under a second; SLOs with burn-rate alerts; chaos tests (Postgres, sqlgen, Redis killed, 50% model errors) pass with zero 500s, serving stale answers instead of errors | Kubernetes, Argo CD, Redpanda, Prometheus rules, Grafana |
 | **Services and data tier** | Versioned `/v1` API; answer cache in Redis, retired by each new load (a hit takes 3 ms vs 2.2 s for a miss); safe retries with `Idempotency-Key`; SQL generation as a gRPC service; a CI check that blocks risky migrations | FastAPI, Redis, gRPC + protobuf, GitHub Actions |
 
@@ -844,6 +845,75 @@ comfortably, so this milestone used a 4-core one. What went wrong along the way
 (13 items, including the experiment Argo CD undid and the alert that could never
 fire): [docs/m3-what-broke.md](docs/m3-what-broke.md).
 
+## Security and compliance
+
+The brands in this data are competitors, so the core promise is that each one sees only its own
+numbers, even though a language model writes the SQL. Milestone 4 adds login, per-brand
+access, proper secrets handling and supply-chain checks, guided by a
+[STRIDE threat model](docs/security/threat-model.md).
+
+- **Login with Keycloak.** The chat page signs in with OIDC (authorization code + PKCE, no
+  secret in the browser). The API verifies every token: its signature against Keycloak's
+  keys, plus issuer, audience and expiry. The realm is code (`deploy/keycloak/`) with no
+  passwords in it.
+- **Per-brand access, enforced in code.** A user's Keycloak groups (`brand-C101`, …,
+  `all-brands`) become the brands they may see.
+  - The SQL guard rewrites every query so each brand view only returns those brands, whatever
+    the model wrote. A prompt-injected "all brands" or `OR 1=1` still gets only the caller's
+    rows.
+  - A query naming another brand gets a clear 403.
+  - Cache and idempotency keys are per caller, so one brand's cached answer is never served
+    to another.
+- **Secrets out of `.env`.** The chatbot reads its database password from Vault, with a token
+  that can read only that one secret, mounted as a file; its environment holds no password.
+  In a Codespace, other secrets come from Codespaces secrets. Local test credentials are
+  generated per Codespace and never committed.
+- **Scans on every PR:** gitleaks (secrets in all of git history), bandit (Python security
+  issues) and Trivy (Dockerfile, Kubernetes and Terraform misconfiguration, and known CVEs in
+  the built image). Accepted findings carry a reason and an expiry date
+  (`.trivyignore`).
+- **Hardened containers.** The image runs as a non-root user. Every pod runs non-root with a
+  read-only filesystem, no privilege escalation and no Linux capabilities. Milestone 3's chaos
+  tests still pass 6/6 on the hardened cluster.
+- **AI governance.** [docs/ai-governance.md](docs/ai-governance.md) covers what the models may
+  see, why they're never the security boundary, and how answers stay checkable.
+
+Decisions and trade-offs: [ADR 0004](docs/adr/0004-security-and-access.md).
+
+<img src="pics/auth_keycloak_login.jpg" alt="Keycloak sign-in page titled Retail Sales Chatbot with username and password fields and a Sign In button" width="760">
+
+*Opening the chatbot without a session redirects to Keycloak's sign-in for the `retail`
+realm. The password never touches the chatbot.*
+
+<img src="pics/auth_forbidden_other_brand.jpg" alt="Chat page signed in as aurora.analyst with brand Aurora Apparel; the question Sales by brand for Cobalt Outdoor in the last 4 weeks is answered with the red message You don't have access to Cobalt Outdoor's data" width="900">
+
+*Signed in as Aurora's analyst. A question about a competitor gets a 403 from the SQL guard,
+and nothing reaches the database.*
+
+<img src="pics/auth_access_matrix.jpg" alt="Per-brand access table: no token and a forged token get 401; aurora.analyst gets only Aurora Apparel rows, 403 for Cobalt Outdoor, and only Aurora rows even when asking for every brand; cobalt.analyst gets Cobalt Outdoor; retail.admin gets all three brands" width="900">
+
+*Real Keycloak tokens against the running stack. The key row is Aurora asking for "every
+brand": over the same weeks where the admin sees three brands, Aurora still gets only its
+own.*
+
+<img src="pics/ci_security_scans.jpg" alt="GitHub Actions run for the milestone 4 pull request: all nine jobs passed, including the new secret-scan, sast and trivy jobs" width="900">
+
+*Every PR runs nine checks. The three new ones are secret-scan (gitleaks), sast (bandit) and
+trivy.*
+
+### Run it (in the Codespace)
+
+```bash
+bash deploy/auth/up.sh                          # chatbot + Keycloak + Vault; generates .secrets/local.env
+.venv/bin/python -m scripts.access_demo         # 401 / 403 / confined rows with real tokens
+RUN=<ci run id> .venv/bin/python -m scripts.screenshots --milestone 4
+docker compose --profile app --profile auth down
+```
+
+Then open the forwarded port 8000 and sign in as `aurora.analyst`, `cobalt.analyst` or
+`retail.admin` (password: `KC_TEST_USER_PASSWORD` in `.secrets/local.env`). What went wrong
+along the way: [docs/m4-what-broke.md](docs/m4-what-broke.md).
+
 ## Dummy data
 
 3 clients (Aurora Apparel, Bramble Footwear, Cobalt Outdoor) × 3 retailers.
@@ -929,15 +999,17 @@ To run one pipeline from the CLI without Airflow (same steps as its DAG):
 ## Tests
 
 ```bash
-.venv/bin/pytest -q tests                  # 198 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, operations (load_completed publish/consume, DB-outage classification, stale fallback, gRPC retries and reconnect settings), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
+.venv/bin/pytest -q tests                  # 234 unit tests: parser layouts, multi-file precedence/parts, week windows, STM, SQL per level, S3 (moto), API paging, chatbot (routing, SQL guard, repair, cache, all three LLM providers and their errors), telemetry (a span per step, no question text in spans, golden-signal metrics), services (/v1 and legacy routes, Redis cache on fakeredis, data-version invalidation, Redis/DB outages, Idempotency-Key replay/409/422, a real gRPC round trip and its error mapping), migration-safety rules, security (forged/expired/wrong-audience/algorithm-swap tokens, SQL confinement across joins, CTEs, subqueries and unions, 403s, per-caller cache and idempotency, CSP, Vault-then-env secrets), operations (load_completed publish/consume, DB-outage classification, stale fallback, gRPC retries and reconnect settings), triage agent (tool loop with a mocked Bedrock client, step/token caps, none/fake skip, reconcile mismatch, failure isolation, read-only queries), failure email (content, triage note, STARTTLS, skip when unconfigured, never raises)
 cd airflow && ../.venv/bin/pytest -q tests # 15 DAG tests: one DAG per pipeline, subflow shape, reconcile gates the merge, every Redshift writer pooled, priority order, failure path (FAILED, then triage, then email; none can raise)
 ```
 
 CI (`.github/workflows/ci.yml`) runs both suites, checks the gRPC stubs match
 `sqlgen.proto`, runs the migration-safety check, unit-tests the SLO alert rules
 with promtool, renders the Kubernetes manifests and validates them against the
-Kubernetes 1.31 schemas, and runs `terraform fmt` and `terraform validate`, on
-every push to `dev`/`main` and on every PR.
+Kubernetes 1.31 schemas, scans for secrets (gitleaks, all history), Python
+security issues (bandit) and misconfigurations and image CVEs (Trivy), and runs
+`terraform fmt` and `terraform validate`, on every push to `dev`/`main` and on
+every PR.
 
 ## Verified on live AWS
 
@@ -990,6 +1062,9 @@ too, and its answer cache lowers the real cost: a repeated question makes no
 model call and no Redshift query. Milestone 3's Kubernetes cluster, Argo CD and
 Redpanda need a 4-core Codespace, which uses the free hours twice as fast, and
 only while it runs. Delete the cluster when done. Nothing in it touches AWS.
+Milestone 4's Keycloak and Vault run there too, at no AWS cost. The S3 bucket
+deliberately stays on SSE-S3 rather than a customer-managed KMS key (about $1 a
+month plus requests), because it holds only synthetic data. Revisit before any real data.
 The one AWS step, exporting the `chat.*` views
 (about 2,000 rows), is a single short Redshift session, about $0.05.
 
@@ -1016,7 +1091,10 @@ observability/                 OTel Collector, Prometheus and Grafana config; go
 deploy/k8s/                    Kubernetes manifests (Kustomize), synced by Argo CD
 deploy/argocd/, deploy/kind/   Argo CD Application and settings; kind cluster + up.sh / forward.sh
 chaos/                         chaos tests: run.py (experiments) and traffic.py (in-cluster traffic)
+deploy/keycloak/, deploy/vault/, deploy/auth/   Keycloak realm (as code), Vault seeding, auth stack bring-up
+.gitleaks.toml, .trivyignore   security-scan allowlist and accepted findings (with reasons and expiry)
 loadtest/chat.js               k6 load test (1x / 10x; CACHE=on for cache hits and idempotent retries)
 scripts/                       export_chat_views.py (Redshift -> Postgres seed), screenshots.py (README images), idempotency_demo.py, check_migrations.py (CI)
 docs/adr/, docs/m*-what-broke.md   decisions and lessons per milestone
+docs/security/threat-model.md, docs/ai-governance.md   STRIDE threat model; AI-governance note
 ```

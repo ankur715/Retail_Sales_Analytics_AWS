@@ -16,4 +16,5 @@ regexes = [
   '''chat-reader-local''',    # throwaway chat_reader password, same
   '''grafana-local''',        # throwaway Grafana admin password, same
   '''local-dev-token''',      # the mock retailer API's local bearer token
+  '''ci-local|ci-reader''',   # throwaway passwords of the CI job's Postgres container
 ]

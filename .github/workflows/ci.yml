@@ -53,6 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: docker-compose.yml renders for every profile with no secrets set (no auth variable can block `--profile app`)
+        run: |
+          docker compose --profile app --profile obs --profile load config -q
+          docker compose --profile app --profile auth config -q
       - name: deploy/k8s renders (as Argo CD builds it) and every object matches the Kubernetes 1.31 schemas
         run: |
           kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s > rendered.yaml
@@ -60,6 +64,31 @@ jobs:
             -kubernetes-version 1.31.2 /w/rendered.yaml
           docker run --rm -v "$PWD:/w" ghcr.io/yannh/kubeconform:v0.6.7 -summary -ignore-missing-schemas \
             /w/deploy/argocd/application.yaml /w/deploy/argocd/argocd-cm.yaml
+
+  ai-integration:
+    runs-on: ubuntu-latest
+    env:
+      LLM_PROVIDER: none
+      PG_TEST_DSN: postgresql://postgres:ci-local@localhost:5432/retail_dev
+      PG_READER_DSN: postgresql://chat_reader:ci-reader@localhost:5432/retail_dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Postgres + pgvector, seeded with the chat views (the same init scripts as docker-compose)
+        run: |
+          docker run -d --name pg -p 5432:5432 -e POSTGRES_DB=retail_dev -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=ci-local -e CHAT_READER_PASSWORD=ci-reader \
+            -v "$PWD/docker/postgres/initdb:/docker-entrypoint-initdb.d:ro" pgvector/pgvector:0.8.0-pg16
+          for i in $(seq 1 60); do
+            docker exec pg psql -U postgres -d retail_dev -tAc "SELECT count(*) FROM chat.v_calendar" 2>/dev/null && break
+            sleep 2
+          done
+      - name: Examples and eval reference SQL run; RAG index builds and retrieves (access-filtered); eval smoke
+        run: pytest -q tests/integration
 
   # --- security scans (milestone 4) ---------------------------------------------------------
   secret-scan:

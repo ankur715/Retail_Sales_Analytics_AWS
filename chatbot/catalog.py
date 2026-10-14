@@ -33,10 +33,12 @@ def known_value_columns(views: list[str]) -> dict[str, list[str]]:
     return {v: load()["views"][v].get("known_values", []) for v in views}
 
 
-def detail_text(views: list[str], known_values: dict[str, list[str]]) -> str:
+def detail_text(views: list[str], known_values: dict[str, list[str]], examples: list[dict] | None = None) -> str:
     """Prompt section for the selected views only.
 
-    known_values: {"chat.v_sales_by_week.brand": ["Aurora Apparel", ...], ...}"""
+    known_values: {"chat.v_sales_by_week.brand": ["Aurora Apparel", ...], ...}
+    examples: retrieved similar solved questions (milestone 5, rag/); None = each view's own
+    catalog examples, as before"""
     cat = load()
     parts = ["Business rules:", *[f"- {r}" for r in cat["business_rules"]], ""]
     for name in views:
@@ -47,6 +49,11 @@ def detail_text(views: list[str], known_values: dict[str, list[str]]) -> str:
             values = known_values.get(f"{name}.{col}")
             if values:
                 parts.append(f"  known values of {col}: {', '.join(map(str, values))}")
-        parts += [f"  example: {ex['question']}\n    SQL: {ex['sql']}" for ex in v.get("examples", [])]
+        if examples is None:
+            parts += [f"  example: {ex['question']}\n    SQL: {ex['sql']}" for ex in v.get("examples", [])]
+        parts.append("")
+    if examples:
+        parts.append("Similar questions already answered correctly (adapt, don't copy blindly):")
+        parts += [f"- {ex['question']}\n  SQL: {ex['sql']}" for ex in examples]
         parts.append("")
     return "\n".join(parts)

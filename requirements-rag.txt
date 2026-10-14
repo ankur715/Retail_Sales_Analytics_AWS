@@ -1,0 +1,5 @@
+# Retrieval with a real embedding model (rag/embed.py `fastembed`): BAAI/bge-small-en-v1.5 on ONNX
+# Runtime, no torch. Too heavy for the laptop's venv -- install in the Codespace only:
+#   .venv/bin/pip install -r requirements-rag.txt
+# (Tests and CI use the dependency-free `hash` embedder.)
+fastembed>=0.4,<0.6

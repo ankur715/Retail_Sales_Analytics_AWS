@@ -30,8 +30,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from chatbot import access, auth, cache, catalog, db, events, guard, idempotency, llm, telemetry
+from chatbot import access, auth, cache, catalog, db, events, guard, idempotency, llm, telemetry, usage
 from etl import config
+from rag.retrieve import retrieve as rag_retrieve
 from sqlgen import client as sqlgen
 
 @asynccontextmanager
@@ -88,6 +89,7 @@ class ChatResponse(BaseModel):
     cached: bool = False
     stale: bool = False     # the live path failed; this is the last answer we had (see data_as_of)
     error: str | None = None
+    usage: dict | None = None   # LLM calls, tokens and cost of THIS response (zero for a cache hit)
 
 
 MESSAGES = {
@@ -199,7 +201,15 @@ def chat_legacy(req: ChatRequest, response: Response, idempotency_key: str | Non
 
 
 def answer(req: ChatRequest, who: access.Principal = access.ANONYMOUS) -> ChatResponse:
-    started, outcome = time.perf_counter(), "miss"
+    with usage.track() as used:
+        result = _answer_or_fallback(req, who, time.perf_counter())
+    if used.llm_calls and not result.cached:
+        usage.REQUEST_COST.observe(used.cost_usd)
+    return result.model_copy(update={"usage": used.to_dict()})
+
+
+def _answer_or_fallback(req: ChatRequest, who: access.Principal, started: float) -> ChatResponse:
+    outcome = "miss"
     try:
         try:
             result = _answer(req, who)
@@ -239,7 +249,8 @@ def _answer(req: ChatRequest, who: access.Principal) -> ChatResponse:
     # 2-4. write SQL with only those views' metadata, validate, run; one repair round on failure
     with telemetry.step("db.known_values"):
         known = access.filter_known_values(db.known_values(catalog.known_value_columns(route.views)), who)
-    details = catalog.detail_text(route.views, known)
+    retrieved = rag_retrieve(question, route.views, who)   # None when RAG is off or unavailable
+    details = catalog.detail_text(route.views, known, examples=retrieved.examples if retrieved else None)
     plan, error, result, sql = sqlgen.write_sql(question, route.views, details), None, None, None
     for attempt in range(MAX_REPAIRS + 1):
         if not plan.sql.strip():
@@ -264,7 +275,8 @@ def _answer(req: ChatRequest, who: access.Principal) -> ChatResponse:
     # 5. answer from the rows only
     with telemetry.step("db.data_as_of"):
         as_of = db.data_as_of()
-    summary = llm.summarize(question, sql, result["columns"], result["rows"], as_of)
+    summary = llm.summarize(question, sql, result["columns"], result["rows"], as_of,
+                            notes=retrieved.notes if retrieved else None)
     payload = dict(question=question, answer=summary, views=route.views, sql=sql, explanation=plan.explanation,
                    columns=result["columns"], rows=result["rows"], row_count=result["row_count"], data_as_of=as_of)
     cache.put(question, version, payload, who.scope)

@@ -21,7 +21,7 @@ from concurrent import futures
 import grpc
 from prometheus_client import start_http_server
 
-from chatbot import catalog, llm, telemetry
+from chatbot import catalog, llm, telemetry, usage
 from chatbot.llm_types import LLMUnavailable
 from sqlgen import sqlgen_pb2, sqlgen_pb2_grpc
 
@@ -42,14 +42,17 @@ class SqlGenerator(sqlgen_pb2_grpc.SqlGeneratorServicer):
         if not request.question.strip() or not request.views or unknown:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT,
                           f"need a question and catalog views (unknown: {unknown})")
-        try:
-            plan = llm.write_sql(request.question, list(request.views), request.details,
-                                 previous_error=request.previous_error or None,
-                                 previous_sql=request.previous_sql or None)
-        except LLMUnavailable as e:
-            context.abort(CODES.get(e.kind, grpc.StatusCode.UNAVAILABLE), str(e))
+        with usage.track() as used:
+            try:
+                plan = llm.write_sql(request.question, list(request.views), request.details,
+                                     previous_error=request.previous_error or None,
+                                     previous_sql=request.previous_sql or None)
+            except LLMUnavailable as e:
+                context.abort(CODES.get(e.kind, grpc.StatusCode.UNAVAILABLE), str(e))
         return sqlgen_pb2.SqlPlan(sql=plan.sql, explanation=plan.explanation,
-                                  unanswerable_reason=plan.unanswerable_reason)
+                                  unanswerable_reason=plan.unanswerable_reason, llm_calls=used.llm_calls,
+                                  input_tokens=used.input_tokens, output_tokens=used.output_tokens,
+                                  cost_usd=used.cost_usd)
 
 
 def build(address: str, workers: int) -> tuple[grpc.Server, int]:

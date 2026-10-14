@@ -10,11 +10,14 @@
 # auth: Keycloak (login, realm in deploy/keycloak/) and Vault in dev mode (the chatbot's DB
 #      password). Start with  bash deploy/auth/up.sh  -- it generates the credentials into
 #      .secrets/local.env (gitignored) and turns AUTH_MODE=oidc on for the chatbot.
+#      (Their credentials default to empty, not `${VAR:?}`: Compose checks every service's
+#      variables whatever the profile, so a required one would break `--profile app` too.)
 # Passwords below are local-only defaults for throwaway containers, not real credentials.
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.0-pg16   # Postgres 16 + pgvector (retrieval index, milestone 5)
+    ports: ["127.0.0.1:5432:5432"]   # localhost only: rag.ingest and evals.run from the Codespace's .venv
     profiles: ["app"]
     environment:
       POSTGRES_DB: retail_dev
@@ -65,6 +68,9 @@ services:
       AUTH_MODE: ${AUTH_MODE:-off}
       OIDC_ISSUER: http://localhost:8081/realms/retail
       OIDC_JWKS_URL: http://keycloak:8080/realms/retail/protocol/openid-connect/certs
+      RAG_ENABLED: ${RAG_ENABLED:-false}      # build the index first: python -m rag.ingest
+      RAG_EMBEDDER: ${RAG_EMBEDDER:-hash}
+      RAG_DATABASE_URL: postgresql://chat_reader:${CHAT_READER_PASSWORD:-chat-reader-local}@postgres:5432/retail_dev
       REDIS_URL: redis://redis:6379/0
       SQLGEN_ADDR: sqlgen:50051
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}
@@ -104,8 +110,8 @@ services:
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?run deploy/auth/up.sh}
-      KC_TEST_USER_PASSWORD: ${KC_TEST_USER_PASSWORD:?run deploy/auth/up.sh}   # substituted into the realm import
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      KC_TEST_USER_PASSWORD: ${KC_TEST_USER_PASSWORD:-}   # substituted into the realm import
       KC_HOSTNAME: http://localhost:8081            # the issuer browsers and tokens use
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"       # ...while the chatbot fetches keys at keycloak:8080
       KC_HTTP_ENABLED: "true"
@@ -126,7 +132,7 @@ services:
     profiles: ["auth"]
     command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:?run deploy/auth/up.sh}
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:-}
     cap_add: [IPC_LOCK]
     deploy:
       resources:
@@ -137,7 +143,7 @@ services:
     profiles: ["auth"]
     entrypoint: ["/bin/sh", "/init.sh"]
     environment:
-      VAULT_DEV_ROOT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?run deploy/auth/up.sh}
+      VAULT_DEV_ROOT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:-}
       CHAT_READER_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
     volumes:
       - ./deploy/vault/init.sh:/init.sh:ro

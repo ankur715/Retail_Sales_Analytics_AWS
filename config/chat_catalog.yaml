@@ -18,6 +18,8 @@ access:
 
 business_rules:
   - "Weeks end on Saturday. week_ending is the Saturday that closes the week."
+  - "Retailers report at different times, so a brand x retailer pair may have no rows at weeks_ago = 0. For 'latest', 'current', 'right now' or 'most recent' about a specific brand, retailer or product, use that pair's own latest week (its MAX(week_ending)), not weeks_ago = 0."
+  - "Product names are not listed in full. If a question names a product or style (e.g. 'Daypack'), filter with product_name LIKE 'Daypack%' instead of saying it doesn't exist."
   - "weeks_ago = 0 is the LATEST week loaded (not today). 'Last week' means weeks_ago = 0; 'last 4 weeks' means weeks_ago BETWEEN 0 AND 3; 'the 4 weeks before that' means weeks_ago BETWEEN 4 AND 7."
   - "sales_usd is net sales in US dollars for the week. inventory_units is units on hand at week end (a snapshot: never SUM inventory across weeks; use the latest week or an average)."
   - "brand is the client (the company whose products are sold); retailer is the store chain that reports the data."

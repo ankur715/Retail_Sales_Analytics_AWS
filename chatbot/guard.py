@@ -5,6 +5,9 @@ not be rejected for containing "update"). Accepted only if it is:
   - exactly one statement, and a read-only query (SELECT / UNION / WITH)
   - reading only the views this question was routed to (chat.* allowlist);
     CTE names defined in the query itself are allowed
+  - only known functions (milestone 5): anything sqlglot doesn't recognise as a standard
+    function is refused (pg_read_file, pg_sleep, set_config, query_to_xml, lo_import, ...),
+    as are functions that reveal who/where the query runs (current_user, version(), ...)
   - row-capped: a missing or larger LIMIT becomes MAX_ROWS
   - confined to the caller's brands (milestone 4): every view with a brand column is
     replaced by a subquery filtered to those brands, and SQL that names another brand is
@@ -22,6 +25,10 @@ from chatbot import access
 MAX_ROWS = 500
 WRITE_NODES = (exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop, exp.Alter,
                exp.Command, exp.Grant, exp.TruncateTable, exp.Copy)
+
+
+# Recognised by sqlglot but reveal the session or server: not needed to answer a sales question
+ENVIRONMENT_FUNCS = (exp.CurrentUser, exp.SessionUser, exp.CurrentVersion, exp.CurrentDatabase, exp.CurrentSchema)
 
 
 class UnsafeSQL(ValueError):
@@ -45,9 +52,17 @@ def validate(sql: str, allowed_views: list[str], brands: frozenset[str] | None =
     if any(isinstance(node, WRITE_NODES) for node in tree.walk()):
         raise UnsafeSQL("query contains a write or DDL operation")
 
+    for func in tree.find_all(exp.Func):
+        if isinstance(func, exp.Anonymous):        # not a function sqlglot knows: refuse, don't guess
+            raise UnsafeSQL(f"function {func.name.upper()}() is not allowed; use standard SQL functions")
+        if isinstance(func, ENVIRONMENT_FUNCS):
+            raise UnsafeSQL(f"{func.sql(dialect='redshift')} is not allowed")
+
     allowed = {v.lower() for v in allowed_views}
     cte_names = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
     for table in tree.find_all(exp.Table):
+        if not table.name:                          # FROM generate_series(...), dblink(...)
+            raise UnsafeSQL("table functions are not allowed; select from the views")
         name = f"{table.db}.{table.name}".lower() if table.db else table.name.lower()
         if not table.db and name in cte_names:
             continue

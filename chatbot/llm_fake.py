@@ -21,7 +21,7 @@ import time
 
 from pydantic import BaseModel
 
-from chatbot import catalog
+from chatbot import catalog, usage
 from chatbot.llm_types import LLMUnavailable, Route, SqlPlan
 from etl import config
 
@@ -73,16 +73,24 @@ def _sql(prompt: str) -> SqlPlan:
     return SqlPlan(sql=sql, explanation=f"fake: canned example query for {view}")
 
 
+def _counted(prompt: str, result):
+    """Tokens estimated from the real prompt and answer, so cost dashboards show what these
+    prompts would cost (priced as the default real model, config/llm_prices.yaml)."""
+    text = result.model_dump_json() if isinstance(result, BaseModel) else str(result)
+    usage.record("fake", "fake", usage.estimate_tokens(prompt), usage.estimate_tokens(text))
+    return result
+
+
 def json_call(prompt: str, schema: type[BaseModel]) -> BaseModel:
     _behave()
     if schema is Route:
-        return _route(prompt)
+        return _counted(prompt, _route(prompt))
     if schema is SqlPlan:
-        return _sql(prompt)
+        return _counted(prompt, _sql(prompt))
     raise LLMUnavailable(f"Fake LLM has no canned answer for {schema.__name__}", kind="config")
 
 
 def text_call(prompt: str) -> str:
     _behave()
     rows = re.search(r"Result \((\d+) rows", prompt)
-    return f"(fake answer) The query returned {rows.group(1) if rows else 'some'} rows."
+    return _counted(prompt, f"(fake answer) The query returned {rows.group(1) if rows else 'some'} rows.")

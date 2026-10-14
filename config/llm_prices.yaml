@@ -1,0 +1,18 @@
+# LLM list prices, USD per million tokens, used for per-request cost (chatbot/usage.py, Grafana,
+# the eval report). Reviewed in PRs like any config; update when a provider changes prices.
+# First match on the model id wins (case-insensitive substring).
+models:
+  - match: claude-haiku-4-5        # default real model (Bedrock inference profile)
+    input: 1.00
+    output: 5.00
+  - match: nova-lite               # the triage agent's default
+    input: 0.06
+    output: 0.24
+  - match: gemini                  # free tier in this project: no charge, a daily request quota instead
+    input: 0.0
+    output: 0.0
+  - match: fake                    # load/chaos tests: priced as the default real model, so dashboards
+    priced_as: claude-haiku-4-5    # show what the same prompts would cost on Haiku 4.5
+  - match: ollama                  # self-hosted: no per-token charge (the machine is the cost)
+    input: 0.0
+    output: 0.0

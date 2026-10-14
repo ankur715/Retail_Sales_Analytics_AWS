@@ -44,7 +44,7 @@ def pipeline(monkeypatch, redis_store):
     monkeypatch.setattr(chat_app.config, "GOOGLE_API_KEY", "test-key")
     monkeypatch.setattr(chat_app.config, "SQLGEN_ADDR", "")
     monkeypatch.setattr(llm, "route", lambda q: llm.Route(views=["chat.v_sales_by_week"], reason="totals"))
-    monkeypatch.setattr(llm, "summarize", lambda q, sql, cols, rows, as_of: f"{len(rows)} rows")
+    monkeypatch.setattr(llm, "summarize", lambda q, sql, cols, rows, as_of, **kw: f"{len(rows)} rows")
 
     def write_sql(*args, **kwargs):
         calls["write_sql"] += 1
@@ -188,7 +188,7 @@ def test_same_key_different_body_is_rejected(pipeline):
 def test_same_key_while_the_first_is_running_is_409(pipeline, monkeypatch):
     started, release = threading.Event(), threading.Event()
 
-    def slow_summary(*args):
+    def slow_summary(*args, **kwargs):
         started.set()
         release.wait(5)
         return "done"
@@ -206,13 +206,13 @@ def test_same_key_while_the_first_is_running_is_409(pipeline, monkeypatch):
 
 
 def test_a_failed_first_run_releases_the_key(pipeline, monkeypatch):
-    def busy(*args):
+    def busy(*args, **kwargs):
         raise llm.LLMUnavailable("throttled", kind="busy")
 
     monkeypatch.setattr(llm, "summarize", busy)
     client = TestClient(chat_app.app)
     assert ask(client, key="k3").status_code == 503
-    monkeypatch.setattr(llm, "summarize", lambda *a: "recovered")
+    monkeypatch.setattr(llm, "summarize", lambda *a, **k: "recovered")
     retry = ask(client, key="k3")
     assert retry.status_code == 200 and retry.json()["answer"] == "recovered"
     assert "Idempotent-Replayed" not in retry.headers

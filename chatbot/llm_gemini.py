@@ -10,6 +10,7 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel
 
+from chatbot import usage
 from chatbot.llm_types import LLMUnavailable
 from etl import config
 
@@ -52,7 +53,12 @@ def _server_retry_delay(e: errors.APIError) -> float:
 def _generate(prompt: str, gen_config: types.GenerateContentConfig):
     for attempt, delay in enumerate((*RETRY_DELAYS, None)):
         try:
-            return client().models.generate_content(model=config.GEMINI_MODEL, contents=prompt, config=gen_config)
+            resp = client().models.generate_content(model=config.GEMINI_MODEL, contents=prompt, config=gen_config)
+            meta = getattr(resp, "usage_metadata", None)
+            if meta is not None:
+                usage.record("gemini", config.GEMINI_MODEL, meta.prompt_token_count or 0,
+                             meta.candidates_token_count or 0)
+            return resp
         except errors.APIError as e:
             if not (e.code == 429 or (e.code or 0) >= 500):
                 raise LLMUnavailable(f"Gemini error {e.code} {e.status}", kind="config") from e

@@ -27,6 +27,11 @@ RUN=<CI run id> for the CI checks shot:
   auth_forbidden_other_brand.jpg  signed in as aurora.analyst, a Cobalt question gets the 403
   auth_access_matrix.jpg          the access demo's table (401 / 403 / confined rows)
   ci_security_scans.jpg           the PR's CI run on GitHub: every job, security scans included, passing
+Milestone 5 -- after a k6 run (loadtest/results/{cost_start,cost_end}), scripts.injection_report and
+evals.run (loadtest/results/{injection,eval_scorecard}.svg):
+  ai_cost_latency_per_request.jpg Grafana: cost per question, spend by step, tokens, latency
+  ai_prompt_injection_suite.jpg   the injection suite: every attack refused, confined or 403
+  ai_eval_scorecard.jpg           the 50-question eval: routing, execution accuracy, judge, cost
 """
 import argparse
 import json
@@ -213,6 +218,28 @@ def milestone4() -> list[str]:
         (["ci_security_scans"] if os.environ.get("RUN") else [])
 
 
+def milestone5() -> list[str]:
+    names = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        if (RESULTS / "cost_start").exists():
+            start, end = _epoch("cost_start"), _epoch("cost_end")
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(f"{GRAFANA}/d/chatbot-llm-cost/?orgId=1&from={(start - 30) * 1000}&to={(end + 30) * 1000}"
+                      f"&theme=light&kiosk&refresh=")
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(6000)
+            page.screenshot(path=str(PICS / "ai_cost_latency_per_request.jpg"), type="jpeg", quality=85,
+                            clip={"x": 0, "y": 0, "width": 1440, "height": 820})
+            names.append("ai_cost_latency_per_request")
+        for svg, name in (("injection.svg", "ai_prompt_injection_suite"), ("eval_scorecard.svg", "ai_eval_scorecard")):
+            if (RESULTS / svg).exists():
+                svg_shot(browser.new_page(viewport=VIEWPORT), RESULTS / svg, PICS / f"{name}.jpg")
+                names.append(name)
+        browser.close()
+    return names
+
+
 def milestone1() -> list[str]:
     start, mid, end = _epoch("start"), _epoch("mid"), _epoch("end")
     svg = k6_svg()
@@ -241,8 +268,9 @@ def milestone1() -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--milestone", type=int, choices=(1, 2, 3, 4), default=4)
-    names = {1: milestone1, 2: milestone2, 3: milestone3, 4: milestone4}[parser.parse_args().milestone]()
+    parser.add_argument("--milestone", type=int, choices=(1, 2, 3, 4, 5), default=5)
+    names = {1: milestone1, 2: milestone2, 3: milestone3, 4: milestone4,
+             5: milestone5}[parser.parse_args().milestone]()
     for name in names:
         print(name, f"{(PICS / f'{name}.jpg').stat().st_size // 1024} KB")
 

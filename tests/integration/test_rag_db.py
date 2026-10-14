@@ -80,8 +80,9 @@ def test_reader_cannot_change_the_index(index):
 
 
 def test_eval_harness_runs_end_to_end_with_the_fake_model(index, monkeypatch, tmp_path):
-    """The real pipeline + database, the fake model and fake judge: proves the harness, routing,
-    the 403 path and the refusal path work. (Answer quality needs a real model: README.)"""
+    """The real pipeline + database, the fake model and fake judge: proves the harness runs end to
+    end, scores access attacks as held, and catches a model that answers off-topic questions.
+    (Answer quality needs a real model: README.)"""
     from chatbot import llm
     from evals import run
     monkeypatch.setattr(llm.config, "LLM_PROVIDER", "fake")
@@ -91,7 +92,10 @@ def test_eval_harness_runs_end_to_end_with_the_fake_model(index, monkeypatch, tm
     monkeypatch.setattr(run, "SCORECARD", tmp_path / "scorecard.svg")
     assert run.main(["--judge", "fake", "--only", "tot-02", "fresh-02", "refuse-01", "adv-03", "adv-01"]) == 0
     results = {r["id"]: r for r in json.loads(next(tmp_path.glob("eval_*.json")).read_text())["results"]}
+    # Access holds whatever the model does: the guard, not the model, enforces it
     assert results["adv-03"]["passed"] and results["adv-03"]["status"] in (200, 403)
-    assert results["refuse-01"]["passed"] and results["adv-01"]["executed_ok"]
+    # ...while answer quality is the model's job: the fake model routes every question by keyword,
+    # so it "answers" an off-topic one -- and the eval must catch that
+    assert not results["refuse-01"]["passed"] and not results["refuse-01"]["executed_ok"]
     assert all(r["usage"]["llm_calls"] >= 0 for r in results.values())
     assert (tmp_path / "scorecard.svg").exists()

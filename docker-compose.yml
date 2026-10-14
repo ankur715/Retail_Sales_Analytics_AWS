@@ -17,6 +17,7 @@
 services:
   postgres:
     image: pgvector/pgvector:0.8.0-pg16   # Postgres 16 + pgvector (retrieval index, milestone 5)
+    ports: ["127.0.0.1:5432:5432"]   # localhost only: rag.ingest and evals.run from the Codespace's .venv
     profiles: ["app"]
     environment:
       POSTGRES_DB: retail_dev

@@ -6,7 +6,7 @@ import threading
 
 import grpc
 
-from chatbot import llm, telemetry
+from chatbot import llm, telemetry, usage
 from chatbot.llm_types import LLMUnavailable, SqlPlan
 from etl import config
 from sqlgen import sqlgen_pb2, sqlgen_pb2_grpc
@@ -69,4 +69,5 @@ def write_sql(question: str, views: list[str], details: str, previous_error: str
             if kind is None:   # INVALID_ARGUMENT, INTERNAL, ...: a bug, not a busy model -- let it be a 500
                 raise RuntimeError(f"sqlgen {e.code().name}: {e.details()}") from None
             raise LLMUnavailable(f"sqlgen {e.code().name}: {e.details()}", kind=kind) from None
+    usage.add(reply.input_tokens, reply.output_tokens, reply.cost_usd, calls=reply.llm_calls)   # metrics: in sqlgen
     return SqlPlan(sql=reply.sql, explanation=reply.explanation, unanswerable_reason=reply.unanswerable_reason)

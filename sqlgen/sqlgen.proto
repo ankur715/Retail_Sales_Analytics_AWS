@@ -24,4 +24,10 @@ message SqlPlan {
   string sql = 1;               // empty when the question can't be answered from these views
   string explanation = 2;
   string unanswerable_reason = 3;
+  // What the model call(s) behind this plan used (milestone 5): the chatbot adds it to the
+  // question's total, so per-question cost includes the work done in this service.
+  int32 llm_calls = 4;
+  int32 input_tokens = 5;
+  int32 output_tokens = 6;
+  double cost_usd = 7;
 }

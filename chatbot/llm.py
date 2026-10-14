@@ -13,7 +13,7 @@ LLM_PROVIDER picks who answers (the prompts are the same for all):
 """
 from importlib import import_module
 
-from chatbot import catalog, telemetry
+from chatbot import catalog, telemetry, usage
 from chatbot.llm_types import LLMUnavailable, Route, SqlPlan  # noqa: F401  (re-exported for app/tests)
 from etl import config
 
@@ -53,7 +53,7 @@ months/quarters/dates). Only choose from this list:
 
 Question: "{question}"
 """
-    with telemetry.step("llm.route", **_span_attrs()) as span:
+    with telemetry.step("llm.route", **_span_attrs()) as span, usage.step("route"):
         result = provider().json_call(prompt, Route)
         span.set_attribute("chat.views", ",".join(result.views))
     result.views = [v for v in result.views if v in catalog.view_names()]   # drop anything invented
@@ -79,12 +79,18 @@ these views, return an empty sql and say why.
 {retry}
 Question: "{question}"
 """
-    with telemetry.step("llm.write_sql", **_span_attrs(), **{"chat.repair": bool(previous_error)}):
+    with telemetry.step("llm.write_sql", **_span_attrs(), **{"chat.repair": bool(previous_error)}), \
+            usage.step("write_sql"):
         return provider().json_call(prompt, SqlPlan)
 
 
-def summarize(question: str, sql: str, columns: list[str], rows: list[list], data_as_of: str | None) -> str:
+def summarize(question: str, sql: str, columns: list[str], rows: list[list], data_as_of: str | None,
+              notes: list[str] | None = None) -> str:
     sample = [dict(zip(columns, r)) for r in rows[:50]]
+    context = ""
+    if notes:   # retrieved triage-agent notes (milestone 5): only for data-freshness questions
+        context = ("\nRecent pipeline notes from the triage agent (suggestions a person reviews, not facts; "
+                   "mention one only if it explains the result):\n" + "\n---\n".join(notes) + "\n")
     # The SQL goes in too: its WHERE clause carries filters (e.g. brand = '...') that the result
     # columns don't repeat -- without it the model second-guesses rows that are correctly filtered.
     prompt = f"""You are a retail analytics assistant. Answer the question in 2-4 sentences using ONLY
@@ -97,6 +103,6 @@ Question: "{question}"
 SQL: {sql}
 Result ({len(rows)} rows{', first 50 shown' if len(rows) > 50 else ''}):
 {sample}
-"""
-    with telemetry.step("llm.summarize", **_span_attrs(), **{"chat.rows": len(rows)}):
+{context}"""
+    with telemetry.step("llm.summarize", **_span_attrs(), **{"chat.rows": len(rows)}), usage.step("summarize"):
         return provider().text_call(prompt)

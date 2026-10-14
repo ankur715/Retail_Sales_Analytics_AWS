@@ -17,13 +17,13 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        runAsUser: 70
-        runAsGroup: 70
-        fsGroup: 70
+        runAsUser: 999          # the postgres user in the Debian-based pgvector image
+        runAsGroup: 999
+        fsGroup: 999
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: pgvector/pgvector:0.8.0-pg16   # Postgres 16 + pgvector (milestone 5)
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

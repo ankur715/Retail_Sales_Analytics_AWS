@@ -14,7 +14,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.0-pg16   # Postgres 16 + pgvector (retrieval index, milestone 5)
     profiles: ["app"]
     environment:
       POSTGRES_DB: retail_dev
@@ -65,6 +65,9 @@ services:
       AUTH_MODE: ${AUTH_MODE:-off}
       OIDC_ISSUER: http://localhost:8081/realms/retail
       OIDC_JWKS_URL: http://keycloak:8080/realms/retail/protocol/openid-connect/certs
+      RAG_ENABLED: ${RAG_ENABLED:-false}      # build the index first: python -m rag.ingest
+      RAG_EMBEDDER: ${RAG_EMBEDDER:-hash}
+      RAG_DATABASE_URL: postgresql://chat_reader:${CHAT_READER_PASSWORD:-chat-reader-local}@postgres:5432/retail_dev
       REDIS_URL: redis://redis:6379/0
       SQLGEN_ADDR: sqlgen:50051
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}

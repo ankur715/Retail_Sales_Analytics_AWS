@@ -78,6 +78,15 @@ OIDC_JWKS_URL = os.environ.get("OIDC_JWKS_URL", "")      # signing keys, as the 
 OIDC_AUDIENCE = os.environ.get("OIDC_AUDIENCE", "chatbot-api")
 OIDC_WEB_CLIENT_ID = os.environ.get("OIDC_WEB_CLIENT_ID", "chatbot-web")   # the chat page's public client (PKCE)
 
+# --- Retrieval (milestone 5): pgvector index of example SQL, view docs and triage notes (rag/).
+# Off = the catalog's own examples go in the prompt, as before. The index lives in Postgres
+# (the Codespace copy; Neon/Supabase in production) -- Redshift has no vector type.
+RAG_ENABLED = os.environ.get("RAG_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+RAG_DATABASE_URL = secrets.get("RAG_DATABASE_URL", "")     # read-only user
+RAG_EMBEDDER = os.environ.get("RAG_EMBEDDER", "hash")       # hash | fastembed (must match the index)
+RAG_EXAMPLES_K = int(os.environ.get("RAG_EXAMPLES_K", "4"))
+RAG_NOTES_K = int(os.environ.get("RAG_NOTES_K", "2"))
+
 # --- Events (milestone 3): a load_completed message per successful load, on Redpanda (Kafka API) ---
 # Unset = no events (CI, tests, the laptop); the chatbot then falls back to its 60 s version check.
 EVENTS_BOOTSTRAP = os.environ.get("EVENTS_BOOTSTRAP", "")          # e.g. redpanda:9092

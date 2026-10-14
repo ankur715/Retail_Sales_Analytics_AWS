@@ -18,6 +18,7 @@ from functools import lru_cache
 import anthropic
 from pydantic import BaseModel
 
+from chatbot import usage
 from chatbot.llm_types import LLMUnavailable
 from etl import config
 
@@ -50,6 +51,8 @@ def _call(fn, **kwargs):
         raise LLMUnavailable(f"Bedrock error {e.status_code}: {e.message}", kind=kind) from e
     except anthropic.APIConnectionError as e:
         raise LLMUnavailable(f"Can't reach Bedrock: {e}") from e
+    if getattr(response, "usage", None) is not None:
+        usage.record("bedrock", model_name(), response.usage.input_tokens, response.usage.output_tokens)
     if response.stop_reason == "refusal":
         raise LLMUnavailable("The model declined this request", kind="declined")
     return response

@@ -28,6 +28,7 @@ configMapGenerator:
     files:
       - ../../docker/postgres/initdb/00_roles.sh
       - ../../docker/postgres/initdb/10_chat_views.sql
+      - ../../docker/postgres/initdb/20_rag.sql
   - name: postgres-seed
     files:
       - ../../docker/postgres/initdb/data/v_calendar.csv

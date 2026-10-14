@@ -245,3 +245,20 @@ def test_ollama_malformed_output_is_retryable(ollama):
     with pytest.raises(llm.LLMUnavailable) as e:
         llm.route("q")
     assert e.value.kind == "busy"
+
+
+def test_the_image_contains_every_package_the_services_import():
+    """The chatbot imports rag/ (milestone 5); a missing COPY only shows up as a crash at deploy."""
+    import ast
+    root = documents.ROOT
+    dockerfile = (root / "docker" / "chatbot.Dockerfile").read_text()
+    copied = set(re.findall(r"^COPY (\w+)/", dockerfile, re.M))
+    imported = set()
+    for path in [*(root / "chatbot").glob("*.py"), *(root / "sqlgen").glob("*.py"), *(root / "rag").glob("*.py")]:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                imported.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+    local = {p.name for p in root.iterdir() if (p / "__init__.py").exists()}
+    assert imported & local <= copied, imported & local - copied

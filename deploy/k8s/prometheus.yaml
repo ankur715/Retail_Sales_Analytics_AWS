@@ -32,12 +32,23 @@ spec:
       labels: { app: prometheus }
     spec:
       enableServiceLinks: false
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
       serviceAccountName: prometheus
       containers:
         - name: prometheus
           image: prom/prometheus:v2.55.1
           args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus",
                  "--storage.tsdb.retention.time=2d"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports: [{ containerPort: 9090, name: http }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }

@@ -11,9 +11,20 @@ spec:
       labels: { app: grafana }
     spec:
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: grafana
           image: grafana/grafana:11.3.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports: [{ containerPort: 3000, name: http }]
           env:
             - name: GF_SECURITY_ADMIN_PASSWORD
@@ -25,10 +36,19 @@ spec:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 384Mi }
           volumeMounts:
+            - { name: grafana-data, mountPath: /var/lib/grafana }
+            - { name: grafana-logs, mountPath: /var/log/grafana }
+            - { name: tmp, mountPath: /tmp }
             - { name: datasources, mountPath: /etc/grafana/provisioning/datasources }
             - { name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards }
             - { name: dashboards, mountPath: /var/lib/grafana/dashboards }
       volumes:
+        - name: grafana-data
+          emptyDir: {}
+        - name: grafana-logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: datasources
           configMap: { name: grafana-datasources }
         - name: dashboard-provider

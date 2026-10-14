@@ -4,7 +4,10 @@ gets the stored answer -- no model call and no query.
 Entries live in the store (Redis in the compose stack, so they survive a restart and
 are shared by every chatbot replica) under
 
-    chat:answer:<data version>:<sha256 of the normalized question>
+    chat:answer:<data version>:<caller's brand scope>:<sha256 of the normalized question>
+
+The brand scope (milestone 4, chatbot/access.py) keeps one brand's answers from ever being
+served to another: the same question asked by Aurora and by Cobalt are different entries.
 
 The data version is the latest successful load time, MAX(last_successful_load_at)
 from chat.v_data_freshness: a new load changes it, so answers computed from older
@@ -65,34 +68,34 @@ def _hash(question: str) -> str:
     return hashlib.sha256(normalize(question).encode()).hexdigest()[:32]
 
 
-def _key(question: str, version: str) -> str:
-    return f"chat:answer:{version}:{_hash(question)}"
+def _key(question: str, version: str, scope: str = "all") -> str:
+    return f"chat:answer:{version}:{scope}:{_hash(question)}"
 
 
-def last(question: str) -> dict | None:
+def last(question: str, scope: str = "all") -> dict | None:
     """The most recent answer to this question from ANY data version (kept 24 h): the
     fallback when the model or the database is down. Its data_as_of says how old it is."""
     try:
-        raw = store.get().get(f"chat:last:{_hash(question)}")
+        raw = store.get().get(f"chat:last:{scope}:{_hash(question)}")
     except Exception:
         telemetry.STORE_ERRORS.labels("cache_last").inc()
         return None
     return json.loads(raw) if raw else None
 
 
-def get(question: str, version: str | None) -> dict | None:
+def get(question: str, version: str | None, scope: str = "all") -> dict | None:
     if version is None:
         return None
     try:
         with telemetry.step("cache.get"):
-            raw = store.get().get(_key(question, version))
+            raw = store.get().get(_key(question, version, scope))
     except Exception:
         telemetry.STORE_ERRORS.labels("cache_get").inc()
         return None
     return json.loads(raw) if raw else None
 
 
-def put(question: str, version: str | None, payload: dict) -> None:
+def put(question: str, version: str | None, payload: dict, scope: str = "all") -> None:
     """Store under the version read at the START of the request: if a load lands
     mid-request, the answer was computed from the older data and must not be
     filed under the new version."""
@@ -100,7 +103,7 @@ def put(question: str, version: str | None, payload: dict) -> None:
         return
     try:
         raw = json.dumps(payload)
-        store.get().set(_key(question, version), raw, ex=TTL)
-        store.get().set(f"chat:last:{_hash(question)}", raw, ex=STALE_TTL)
+        store.get().set(_key(question, version, scope), raw, ex=TTL)
+        store.get().set(f"chat:last:{scope}:{_hash(question)}", raw, ex=STALE_TTL)
     except Exception:
         telemetry.STORE_ERRORS.labels("cache_put").inc()

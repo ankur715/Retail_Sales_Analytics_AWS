@@ -7,6 +7,9 @@
 #      (answer cache + Idempotency-Key records).
 # obs: OpenTelemetry Collector -> Jaeger (traces), Prometheus (metrics), Grafana (dashboards in
 #      observability/). Start both:  docker compose --profile app --profile obs up -d --build
+# auth: Keycloak (login, realm in deploy/keycloak/) and Vault in dev mode (the chatbot's DB
+#      password). Start with  bash deploy/auth/up.sh  -- it generates the credentials into
+#      .secrets/local.env (gitignored) and turns AUTH_MODE=oidc on for the chatbot.
 # Passwords below are local-only defaults for throwaway containers, not real credentials.
 
 services:
@@ -54,7 +57,14 @@ services:
       REDSHIFT_DB: retail_dev
       REDSHIFT_SSLMODE: disable
       CHAT_REDSHIFT_USER: chat_reader
-      CHAT_REDSHIFT_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
+      # With the auth profile this is empty and the password comes from Vault (deploy/auth/up.sh)
+      CHAT_REDSHIFT_PASSWORD: ${CHAT_REDSHIFT_PASSWORD_ENV-chat-reader-local}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_SECRET_PATH: secret/retail/chatbot
+      VAULT_TOKEN_FILE: /run/vault/chatbot
+      AUTH_MODE: ${AUTH_MODE:-off}
+      OIDC_ISSUER: http://localhost:8081/realms/retail
+      OIDC_JWKS_URL: http://keycloak:8080/realms/retail/protocol/openid-connect/certs
       REDIS_URL: redis://redis:6379/0
       SQLGEN_ADDR: sqlgen:50051
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}
@@ -62,6 +72,9 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       sqlgen: { condition: service_healthy }
+      vault-init: { condition: service_completed_successfully, required: false }
+    volumes:
+      - vault-token:/run/vault:ro
     deploy:
       resources:
         limits: { memory: 512m }
@@ -84,6 +97,52 @@ services:
     deploy:
       resources:
         limits: { memory: 256m }
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    profiles: ["auth"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?run deploy/auth/up.sh}
+      KC_TEST_USER_PASSWORD: ${KC_TEST_USER_PASSWORD:?run deploy/auth/up.sh}   # substituted into the realm import
+      KC_HOSTNAME: http://localhost:8081            # the issuer browsers and tokens use
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"       # ...while the chatbot fetches keys at keycloak:8080
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak/realm-retail.json:/opt/keycloak/data/import/realm-retail.json:ro
+    ports: ["8081:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      retries: 30
+    deploy:
+      resources:
+        limits: { memory: 768m }
+
+  vault:
+    image: hashicorp/vault:1.18.3
+    profiles: ["auth"]
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:?run deploy/auth/up.sh}
+    cap_add: [IPC_LOCK]
+    deploy:
+      resources:
+        limits: { memory: 192m }
+
+  vault-init:   # seeds the secret + a read-only token for the chatbot, then exits
+    image: hashicorp/vault:1.18.3
+    profiles: ["auth"]
+    entrypoint: ["/bin/sh", "/init.sh"]
+    environment:
+      VAULT_DEV_ROOT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?run deploy/auth/up.sh}
+      CHAT_READER_PASSWORD: ${CHAT_READER_PASSWORD:-chat-reader-local}
+    volumes:
+      - ./deploy/vault/init.sh:/init.sh:ro
+      - vault-token:/vault-token
+    depends_on: [vault]
 
   otel-collector:
     image: otel/opentelemetry-collector:0.111.0
@@ -143,3 +202,6 @@ services:
     deploy:
       resources:
         limits: { memory: 256m }
+
+volumes:
+  vault-token:   # the chatbot's read-only Vault token (written by vault-init)

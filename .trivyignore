@@ -1,0 +1,13 @@
+# Trivy findings accepted on purpose. Each has a reason and an expiry (exp:), after which CI fails
+# again and the decision must be revisited. Tracked in docs/security/threat-model.md (accepted risks).
+
+# Redshift security group allows egress to 0.0.0.0/0 (infra/terraform/main.tf, aws_security_group.redshift).
+# Redshift Serverless likely needs no SG egress (enhanced VPC routing is off), so the rule can probably be
+# removed -- but that's a live AWS change: it needs the owner's approval and a planned apply to verify COPY
+# from S3 still works. Accepted until then.
+AVD-AWS-0104 exp:2027-01-31
+
+# The S3 bucket is encrypted with SSE-S3 (AES256), not a customer-managed KMS key. It holds synthetic data
+# only; a CMK costs ~$1/month plus requests against limited credits and adds no protection for dummy data.
+# Revisit before any real data lands in the bucket.
+AVD-AWS-0132 exp:2027-01-31

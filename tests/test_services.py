@@ -162,7 +162,7 @@ def test_redis_down_means_uncached_not_failed(pipeline):
 # Idempotency-Key
 # ---------------------------------------------------------------------------
 def test_retry_with_the_same_key_replays_the_first_response(pipeline, monkeypatch):
-    monkeypatch.setattr(cache, "get", lambda q, v: None)   # the cache would hide a second run; turn it off
+    monkeypatch.setattr(cache, "get", lambda *a: None)   # the cache would hide a second run; turn it off
     client = TestClient(chat_app.app)
     first, retry = ask(client, key="order-42"), ask(client, key="order-42")
     assert first.status_code == retry.status_code == 200
@@ -172,7 +172,7 @@ def test_retry_with_the_same_key_replays_the_first_response(pipeline, monkeypatc
 
 
 def test_without_a_key_every_request_runs(pipeline, monkeypatch):
-    monkeypatch.setattr(cache, "get", lambda q, v: None)
+    monkeypatch.setattr(cache, "get", lambda *a: None)
     client = TestClient(chat_app.app)
     ask(client), ask(client)
     assert pipeline["write_sql"] == 2

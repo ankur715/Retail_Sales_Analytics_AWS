@@ -13,6 +13,13 @@ spec:
       labels: { app: redpanda }
     spec:
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: redpanda
           image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
@@ -26,7 +33,15 @@ spec:
             - --overprovisioned
             - --kafka-addr=PLAINTEXT://0.0.0.0:9092
             - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+            # /etc/redpanda is an empty writable dir (read-only root filesystem), so the image's
+            # default config -- which set these -- is gone: give the RPC listener explicitly
+            - --rpc-addr=0.0.0.0:33145
+            - --advertise-rpc-addr=redpanda:33145
           # (dev-container mode already enables topic auto-creation; `rpk redpanda start` has no --set)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports: [{ containerPort: 9092, name: kafka }]
           readinessProbe:
             tcpSocket: { port: kafka }
@@ -34,6 +49,18 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits: { memory: 1Gi }
+          volumeMounts:
+            - { name: rp-data, mountPath: /var/lib/redpanda/data }
+            - { name: rp-config, mountPath: /etc/redpanda }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: rp-data
+          emptyDir: {}
+        - name: rp-config
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+
 ---
 apiVersion: v1
 kind: Service

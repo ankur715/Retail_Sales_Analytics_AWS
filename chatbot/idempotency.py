@@ -8,7 +8,8 @@ first response back instead of a second run of the three model calls.
     same key, different body      422 -- a key belongs to exactly one request
     first run fails (503, crash)  K is released, so the retry runs for real
 
-Records live in the store (chatbot/store.py) under chat:idem:<sha256 of K>. A request
+Records live in the store (chatbot/store.py) under chat:idem:<sha256 of caller + K>: keys are
+per caller (milestone 4), so another user sending the same key can't replay your answer. A request
 without the header behaves as before. If Redis is down the request runs without
 idempotency (fail open, counted): for a read-only chatbot a duplicate run costs a few
 model calls, while refusing service would cost the answer.
@@ -38,8 +39,9 @@ def fingerprint(body: dict) -> str:
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
-def _record_key(key: str) -> str:
-    return f"chat:idem:{hashlib.sha256(key.encode()).hexdigest()}"
+def _record_key(key: str, subject: str) -> str:
+    digest = hashlib.sha256((subject + "\n" + key).encode()).hexdigest()
+    return f"chat:idem:{digest}"
 
 
 def _check(key: str) -> None:
@@ -47,11 +49,11 @@ def _check(key: str) -> None:
         raise HTTPException(400, f"{HEADER} must be 1-{MAX_KEY_LEN} printable ASCII characters")
 
 
-def begin(key: str, fp: str) -> Replay | bool:
+def begin(key: str, fp: str, subject: str = "anonymous") -> Replay | bool:
     """Claim the key. Returns a Replay to send back, True if this request owns the key
     and must finish() or release() it, or False if the store is down (run without it)."""
     _check(key)
-    record = _record_key(key)
+    record = _record_key(key, subject)
     try:
         for _ in range(2):   # the existing record can expire between our two calls; try once more
             if store.get().set(record, json.dumps({"state": "processing", "fp": fp}), ex=PROCESSING_TTL, nx=True):
@@ -78,17 +80,17 @@ def begin(key: str, fp: str) -> Replay | bool:
     return Replay(existing["status"], existing["body"])
 
 
-def finish(key: str, fp: str, status: int, body: dict) -> None:
+def finish(key: str, fp: str, status: int, body: dict, subject: str = "anonymous") -> None:
     try:
-        store.get().set(_record_key(key), json.dumps({"state": "done", "fp": fp, "status": status, "body": body}),
+        store.get().set(_record_key(key, subject), json.dumps({"state": "done", "fp": fp, "status": status, "body": body}),
                         ex=RESULT_TTL)
     except Exception:
         telemetry.STORE_ERRORS.labels("idempotency").inc()
 
 
-def release(key: str) -> None:
+def release(key: str, subject: str = "anonymous") -> None:
     """Give the key back after a failed run, so the client's retry runs for real."""
     try:
-        store.get().delete(_record_key(key))
+        store.get().delete(_record_key(key, subject))
     except Exception:
         telemetry.STORE_ERRORS.labels("idempotency").inc()   # the claim expires after PROCESSING_TTL anyway

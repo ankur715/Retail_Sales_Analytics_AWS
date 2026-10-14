@@ -68,3 +68,11 @@ def test_latency_sleeps_per_call(monkeypatch):
 
 def test_fake_provider_never_turns_the_triage_agent_on():
     assert llm.configured() and not agent.enabled()     # triage would call real Bedrock
+
+
+def test_by_brand_questions_filter_to_the_named_brand():
+    from chatbot.llm_fake import _by_brand
+    assert "brand = 'Cobalt Outdoor'" in _by_brand("Sales by brand for Cobalt Outdoor last week")
+    assert "brand =" not in _by_brand("Sales by brand for every brand")
+    guard.validate(_by_brand("Sales by brand for Aurora Apparel"), ["chat.v_sales_by_week"])
+
